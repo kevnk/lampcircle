@@ -1,0 +1,27 @@
+# DJ Worship song map (sample, not a full file)
+djw: 1
+song:
+  title: Way Maker
+  artist: Leeland
+  meter: 4/4
+  audio:
+    file: "Leeland - Way Maker (Official Live Video)-iJCV_2H9xD0.mp3"
+    source: https://www.youtube.com/watch?v=iJCV_2H9xD0
+    sha256: "<hash of the audio file, so the map finds the right audio>"
+
+grid:
+  # Seconds for every downbeat you tapped, one per bar.
+  # Beats in between are spaced evenly, so tempo drift is fine.
+  downbeats: [3.20, 6.74, 10.27, 13.79, 17.33, 20.86]  # ...86 in the full file
+
+# start_bar = where the part lands (its 1). pickup_beats = how early the singers come in (half-beat steps, up to 16).
+# fade_in happens BEFORE the pickup, so the pickup plays at full volume.
+parts:
+  - { name: Intro,    start_bar: 1,  end_bar: 5,  pickup_beats: 0, fade_in: 0, fade_out: 1, loop: true }
+  - { name: Verse 1,  start_bar: 5,  end_bar: 21, pickup_beats: 1, fade_in: 1, fade_out: 1, loop: true }
+  - { name: Chorus 1, start_bar: 21, end_bar: 29, pickup_beats: 1, fade_in: 1, fade_out: 2, loop: true }
+  - { name: Verse 2,  start_bar: 29, end_bar: 45, pickup_beats: 2, fade_in: 1, fade_out: 1, loop: true }
+  - { name: Chorus 2, start_bar: 45, end_bar: 53, pickup_beats: 1, fade_in: 1, fade_out: 2, loop: true }
+  - { name: Bridge,   start_bar: 53, end_bar: 69, pickup_beats: 1, fade_in: 1, fade_out: 2, loop: true }
+  - { name: Chorus 3, start_bar: 69, end_bar: 77, pickup_beats: 1, fade_in: 1, fade_out: 2, loop: true }
+  - { name: Tag,      start_bar: 77, end_bar: 85, pickup_beats: 0, fade_in: 1, fade_out: 4, loop: true }
