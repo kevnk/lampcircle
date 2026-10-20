@@ -6,7 +6,7 @@ import { useFrame, useKeys } from '../ui';
 import { PerformSession, audio, now, padSourceFor, perfSong, release, type PerfSong, type Snapshot } from '../audio/engine';
 import { KEY_NAMES, numeral, padGroups, route } from '../lib/music';
 import { barSeconds, clock, keyOf, planSeconds, sectionViews, songGrid, songKeys } from '../lib/songMap';
-import type { Reason } from '../lib/performPlan';
+import type { JumpFade, Reason } from '../lib/performPlan';
 import { livePad, songBpm } from './Sets';
 
 type PadMode = 'simple' | 'guided' | 'advanced';
@@ -17,8 +17,21 @@ interface Prefs {
   countIn: boolean;
   keepPad: boolean;
   padVolume: number;
+  jumpFade: JumpFade;
+  fillGaps: boolean;
+  fadePause: boolean;
 }
-const DEFAULT_PREFS: Prefs = { mode: 'advanced', changeOn: 'bar', crossfade: 'beat', countIn: true, keepPad: true, padVolume: 0.8 };
+const DEFAULT_PREFS: Prefs = { mode: 'advanced', changeOn: 'bar', crossfade: 'beat', countIn: true, keepPad: true, padVolume: 0.8, jumpFade: 'out', fillGaps: true, fadePause: true };
+/** Bars that Pause fades out over and Resume fades back in over, when fading is on. */
+const PAUSE_FADE = { out: 3, in: 2 };
+
+const JUMP_FADES: Array<[JumpFade, string, string]> = [
+  ['out', 'Match the fade-out', 'The section you pick fades in where this one fades out.'],
+  ['in', 'Match the fade-in', 'This section fades out where the one you pick fades in.'],
+  ['edited', 'As edited', 'Each section keeps the fades you set in Refine.'],
+];
+
+const option = (active: boolean) => `rounded-md border px-3.5 py-2.5 ${active ? 'border-stage-text bg-stage-text text-stage-bg' : 'border-stage-line hover:bg-stage-card'}`;
 
 function loadPrefs(): Prefs {
   try {
@@ -59,12 +72,14 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
       // Private mode: keep the choice for this visit only.
     }
     if (patch.padVolume !== undefined) sessionRef.current?.setPadVolume(patch.padVolume);
+    if (sessionRef.current) Object.assign(sessionRef.current, { jumpFade: next.jumpFade, fillGaps: next.fillGaps });
   };
 
   useEffect(() => {
     const session = new PerformSession(padSourceFor(pads));
     sessionRef.current = session;
     session.setPadVolume(prefs.padVolume);
+    Object.assign(session, { jumpFade: prefs.jumpFade, fillGaps: prefs.fillGaps });
     if (import.meta.env.DEV) Object.assign(window, { __djw: { ...(window as unknown as { __djw?: object }).__djw, session } });
     return () => session.dispose();
   }, []);
@@ -161,8 +176,8 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   };
   const togglePause = () => {
     if (!session) return;
-    if (snap?.paused) void session.resume();
-    else void session.pause();
+    if (session.paused) session.resume(prefs.fadePause ? PAUSE_FADE.in : 0);
+    else session.pause(prefs.fadePause ? PAUSE_FADE.out : 0);
   };
 
   useEffect(() => {
@@ -224,10 +239,25 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
         </button>
         <div className="ml-auto flex items-center gap-5">
           {(started || !isSong) && !finished && (
-            <button type="button" className="flex items-center gap-2 rounded-md border border-stage-line px-4 py-2 hover:bg-stage-card" onClick={togglePause}>
-              {snap?.paused ? <Play className="h-4 w-4 fill-current" /> : <Pause className="h-4 w-4 fill-current" />}
-              {snap?.paused ? 'Resume' : 'Pause'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button type="button" className="flex items-center gap-2 rounded-md border border-stage-line px-4 py-2 hover:bg-stage-card" onClick={togglePause}>
+                {snap?.paused ? <Play className="h-4 w-4 fill-current" /> : <Pause className="h-4 w-4 fill-current" />}
+                {snap?.paused ? 'Resume' : 'Pause'}
+              </button>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={prefs.fadePause}
+                title={`Pause fades out over ${PAUSE_FADE.out} bars, and Resume fades back in over ${PAUSE_FADE.in}.`}
+                className="flex items-center gap-2 py-2 text-sm text-stage-muted hover:text-stage-text"
+                onClick={() => savePrefs({ fadePause: !prefs.fadePause })}
+              >
+                <span className={`relative h-5 w-9 rounded-full transition-colors ${prefs.fadePause ? 'bg-stage-accent' : 'bg-stage-line'}`}>
+                  <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-stage-text transition-transform ${prefs.fadePause ? 'translate-x-4' : ''}`} />
+                </span>
+                Fade
+              </button>
+            </div>
           )}
           <p className="font-mono text-3xl tabular" aria-label="Position">
             Bar {position && position.bar > 0 ? position.bar : '—'} · {position?.beat ?? '—'}
@@ -264,7 +294,7 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
         </main>
         <aside className="px-5 py-6 max-lg:col-span-2 max-lg:border-t max-lg:border-stage-line">
           {finished ? null : isSong && song ? (
-            <OnDeck song={song} next={items[songIndex + 1]} session={session} snap={snap} started={started} have={have} />
+            <OnDeck song={song} next={items[songIndex + 1]} session={session} snap={snap} started={started} have={have} prefs={prefs} onPrefs={savePrefs} />
           ) : left ? (
             <BringIn
               left={left}
@@ -419,7 +449,25 @@ function SongPads({ song, snap, started, ready, onStart, session }: { song: Song
   );
 }
 
-function OnDeck({ song, next, session, snap, started, have }: { song: Song; next: Song | undefined; session: PerformSession | null; snap: Snapshot | null; started: boolean; have: Set<number> }) {
+function OnDeck({
+  song,
+  next,
+  session,
+  snap,
+  started,
+  have,
+  prefs,
+  onPrefs,
+}: {
+  song: Song;
+  next: Song | undefined;
+  session: PerformSession | null;
+  snap: Snapshot | null;
+  started: boolean;
+  have: Set<number>;
+  prefs: Prefs;
+  onPrefs: (patch: Partial<Prefs>) => void;
+}) {
   const pad = livePad(song, next);
   const tonic = keyOf(songKeys(song)?.end)?.tonic ?? 0;
   const [open, setOpen] = useState(false);
@@ -458,6 +506,23 @@ function OnDeck({ song, next, session, snap, started, have }: { song: Song; next
           </p>
         </div>
       )}
+      <div className="mt-4 rounded-lg border border-stage-line p-4">
+        <Choice title="Jumps to another section">
+          {JUMP_FADES.map(([value, label]) => (
+            <button key={value} type="button" aria-pressed={prefs.jumpFade === value} className={option(prefs.jumpFade === value)} onClick={() => onPrefs({ jumpFade: value })}>
+              {label}
+            </button>
+          ))}
+        </Choice>
+        <p className="mt-2 text-sm text-stage-muted">{JUMP_FADES.find(([value]) => value === prefs.jumpFade)?.[2]} Going on to the next section plays straight through.</p>
+        <label className="mt-3 flex items-start gap-3">
+          <input type="checkbox" className="mt-1 h-4 w-4" checked={prefs.fillGaps} onChange={event => onPrefs({ fillGaps: event.target.checked })} />
+          <span>
+            Fill any silence with a pad
+            <span className="block text-xs text-stage-muted">In the key of the section coming in</span>
+          </span>
+        </label>
+      </div>
       <button type="button" className="mt-4 flex items-center gap-1.5 px-1 py-1" aria-expanded={open} onClick={() => setOpen(!open)}>
         More <ChevronDown className={`h-4 w-4 ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -610,7 +675,6 @@ function BringIn(props: {
   const start = views[startAt] ?? views[0];
   const startKey = start ? keyOf(start.key) : null;
   const offKey = startKey && snap?.pad && snap.pad.tonic !== startKey.tonic;
-  const option = (active: boolean) => `rounded-md border px-3.5 py-2.5 ${active ? 'border-stage-text bg-stage-text text-stage-bg' : 'border-stage-line hover:bg-stage-card'}`;
   return (
     <div>
       <p className="mb-3 font-mono text-xs uppercase tracking-wider text-stage-muted">Bring in next song</p>

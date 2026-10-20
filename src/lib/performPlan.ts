@@ -46,6 +46,27 @@ export function nextBoundary(rule: JumpAt, earliest: number, view: SectionView, 
   return found !== undefined && found < end - 1e-6 ? found : end;
 }
 
+/** How a jump between two different sections lines up its fades. Loops and holds always use the section's own seam. */
+export type JumpFade = 'out' | 'in' | 'edited';
+
+/**
+ * Seconds from the landing (negative is before it) where the old pass fades out and the new one fades in.
+ * Null when the recording runs straight on into the next section: the same audio keeps playing with no fades.
+ * Between different sections, `match` lines one fade up with the other, so seams edited for looping leave no gap.
+ */
+export function seamFades(from: SectionView, to: SectionView, boundary: number, grid: Grid, match: JumpFade): { out: [number, number]; in: [number, number] } | null {
+  if (to.index === from.index + 1 && Math.abs(boundary - to.start) < 1e-3) return null;
+  const fade = fadeOutSpan(from, grid, boundary);
+  const lead = leadIn(to, grid);
+  const out: [number, number] = [fade.start - boundary, fade.end - boundary];
+  const into: [number, number] = [lead.audioStart - to.start, lead.singerStart - to.start];
+  if (from.index === to.index || match === 'edited') return { out, in: into };
+  if (match === 'in') return { out: into, in: into };
+  // The new pass cannot start before its recording does.
+  const start = Math.max(out[0], -to.start);
+  return { out, in: [start, Math.max(start, out[1])] };
+}
+
 export type Reason = 'plan' | 'hold' | 'pick';
 export type Next = { idx: number; pass: number; reason: Reason } | 'end';
 
@@ -75,16 +96,31 @@ export function clockBoundary(anchor: number, period: number, earliest: number):
 
 const FADE_STEPS = 16;
 
+/** How a fade travels between silence and full: `gain` maps progress from 0 to 1 onto a gain, `progress` maps a gain back. */
+export interface FadeShape {
+  gain: (p: number) => number;
+  progress: (v: number) => number;
+}
+
+/** A quarter sine, so a fade-out and a fade-in over the same beats keep their summed power steady instead of dipping 3 dB in the middle. */
+export const EQUAL_POWER: FadeShape = { gain: p => Math.sin((p * Math.PI) / 2), progress: v => (2 * Math.asin(v)) / Math.PI };
+
 /**
- * Points along an equal-power fade from `from` at `start` to `to` at `end`, for gains from 0 to 1.
- * The gain follows a quarter sine, so a fade-out and a fade-in over the same beats keep their summed power
- * steady instead of dipping 3 dB in the middle. Joined by straight ramps, 16 steps stay within 0.2% of the curve.
+ * For taking the whole mix to silence and back. Heard loudness goes as gain^0.6 (Stevens' power law), so this
+ * moves it in a straight line: half as loud (-10 dB) half way. Equal power and a straight gain line hold loud,
+ * then drop away at the end; a straight line in dB spends most of the fade nearly silent.
  */
-export function fadeCurve(from: number, to: number, start: number, end: number): Array<{ t: number; v: number }> {
-  const a = Math.asin(Math.min(1, Math.max(0, from)));
-  const b = Math.asin(Math.min(1, Math.max(0, to)));
+export const EVEN_LOUDNESS: FadeShape = { gain: p => p ** (1 / 0.6), progress: v => v ** 0.6 };
+
+/**
+ * Points along a fade from `from` at `start` to `to` at `end`, for gains from 0 to 1.
+ * Joined by straight ramps, 16 steps stay within 0.2% of either curve.
+ */
+export function fadeCurve(from: number, to: number, start: number, end: number, shape = EQUAL_POWER): Array<{ t: number; v: number }> {
+  const a = shape.progress(Math.min(1, Math.max(0, from)));
+  const b = shape.progress(Math.min(1, Math.max(0, to)));
   return Array.from({ length: FADE_STEPS + 1 }, (_, i) => ({
     t: start + ((end - start) * i) / FADE_STEPS,
-    v: i === 0 ? from : i === FADE_STEPS ? to : Math.sin(a + ((b - a) * i) / FADE_STEPS),
+    v: i === 0 ? from : i === FADE_STEPS ? to : shape.gain(a + ((b - a) * i) / FADE_STEPS),
   }));
 }

@@ -485,6 +485,30 @@ async function main() {
     await sleep(700);
     const after = await ev<{ bar: number; beat: number }>('__djw.session.snapshot().song');
     check('the beat advances on screen', after.bar * 4 + after.beat > before.bar * 4 + before.beat, [before.bar, before.beat, after.bar, after.beat]);
+    // Seams 2 s before the end of the Intro: straight on to Verse 1, or a pick of Chorus 1 (2-beat pickup) under each jump setting.
+    const seams = await ev<Record<string, { shared: boolean; in: number; out: number }>>(`(() => {
+      const engine = __djw.engine;
+      const ps = __djw.session.ps;
+      const intro = ps.views[0];
+      const run = (jumpFade, pick) => {
+        const s = Object.assign(new engine.PerformSession(async () => null), { jumpFade });
+        s.startSong(ps, { from: 0, landingCtx: engine.now() + 0.1 - (intro.end - 2 - intro.start) });
+        if (pick !== null) s.pickSection(pick);
+        const [a, b] = s.segments;
+        const seam = { shared: b.voice === a.voice, in: b.startCtx - b.landingCtx, out: b.prevFadeCtx - b.landingCtx };
+        s.dispose();
+        return seam;
+      };
+      return { next: run('out', null), out: run('out', 2), in: run('in', 2), edited: run('edited', 2) };
+    })()`);
+    const near = (seam: { in: number; out: number }, into: number, out: number) => Math.abs(seam.in - into) < 0.02 && Math.abs(seam.out - out) < 0.02;
+    check('going on to the next section plays straight through', seams.next.shared && near(seams.next, 0, 0), seams.next);
+    check('matching the fade-out brings the picked section in over it', !seams.out.shared && near(seams.out, -0.5, -0.5), seams.out);
+    check('matching the fade-in takes this section out over it', near(seams.in, -1.5, -1.5), seams.in);
+    check('as edited, each section keeps its own fades', near(seams.edited, -1.5, -0.5), seams.edited);
+    await click('Match the fade-in');
+    await waitFor(`__djw.session.jumpFade === 'in'`, 'the jump setting reaches the playing song');
+    await click('Match the fade-out');
     await press('3');
     await waitFor(`/Next: Chorus 1 — at end of phrase \\(in \\d bars?\\)/.test(document.body.innerText)`, 'pick queues Chorus 1 at the phrase');
     await shot('6-perform-song');
@@ -507,12 +531,28 @@ async function main() {
     );
     check('Chorus 2 lands on a bar line', barLine - 1 < 0.005, barLine - 1);
     await waitFor(`__djw.session.snapshot().song.idx === 4`, 'Chorus 2 is playing', 8000);
+    // Pause fades out over 3 bars (6 s at 120 BPM) and then stops the clock. Resume fades back in over 2.
+    const gain = '__djw.engine.audio().main.gain.value';
+    check('Fade is on by default', (await ev<string>(`${find('Fade')}.getAttribute('aria-checked')`)) === 'true');
     await click('Pause');
+    const fadeFrom = await ev<number>('__djw.engine.now()');
+    await sleep(1500);
+    const fading = await ev<number>(gain);
+    check('Pause fades out instead of cutting, and the set plays on under it', fading > 0.3 && fading < 0.9 && (await ev<number>('__djw.engine.now()')) - fadeFrom > 1.2 && (await text()).includes('Resume'), fading);
+    await waitFor(`__djw.engine.audio().ctx.state === 'suspended'`, 'the clock stops when the fade-out ends', 8000);
     const frozen = await ev<number>('__djw.engine.now()');
+    check('the fade-out lasts 3 bars and ends silent', Math.abs(frozen - fadeFrom - 6) < 0.15 && (await ev<number>(gain)) < 0.01, frozen - fadeFrom);
     await sleep(300);
     check('pause freezes the clock', Math.abs((await ev<number>('__djw.engine.now()')) - frozen) < 0.001);
     await click('Resume');
-    await waitFor(`!__djw.session.snapshot().paused`, 'resume');
+    await sleep(1000);
+    const rising = await ev<number>(gain);
+    check('Resume fades back in', rising > 0.03 && rising < 0.6 && !(await ev<boolean>('__djw.session.snapshot().paused')), rising);
+    await click('Fade');
+    await click('Pause');
+    await waitFor(`__djw.engine.audio().ctx.state === 'suspended'`, 'with Fade off, Pause stops at once', 300);
+    await click('Resume');
+    await waitFor(`__djw.engine.audio().ctx.state === 'running' && ${gain} > 0.99`, 'and Resume comes straight back', 300);
     await click('Go to pad (A)');
     await waitFor(`__djw.session.snapshot().pad?.tonic === 9`, 'pad comes in under the song', 12000);
     await click('More');

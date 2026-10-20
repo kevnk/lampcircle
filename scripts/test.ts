@@ -182,6 +182,18 @@ const fadeSpan = (fadeOutEndBeats?: number) => Object.values(plan.fadeOutSpan({ 
 same('the fade-out ends on the boundary by default', fadeSpan(), [1.5, 2]);
 same('a late fade-out end rings over the boundary', fadeSpan(1), [2, 2.6]);
 same('an early fade-out end stops before the boundary', fadeSpan(-1), [1, 1.5]);
+// Seams between sections, on a steady half-second beat. "Chorus 2" fades out early for its own loop; "Chorus 4" fades in on the 1.
+const steady = map.buildGrid(Array.from({ length: 60 }, (_, i) => ({ t: i * 0.5, one: i % 4 === 0 })), 4, 30, false);
+const part = (index: number, start: number, section: object) => ({ index, start, section: { pickupBeats: 0, fadeInBeats: 1, fadeOutBeats: 1, ...section } }) as never;
+const chorus2 = part(2, 10, { pickupBeats: 3, fadeInBeats: 2, fadeOutBeats: 2, fadeOutEndBeats: -3 });
+const chorus4 = part(4, 18, {});
+const seam = (to: never, match: 'out' | 'in' | 'edited') => plan.seamFades(chorus2, to, 14, steady, match);
+same('as edited, a jump keeps both fades and leaves a gap', seam(chorus4, 'edited'), { out: [-2.5, -1.5], in: [-0.5, 0] });
+same('matching the fade-out brings the new section in over it', seam(chorus4, 'out'), { out: [-2.5, -1.5], in: [-2.5, -1.5] });
+same('matching the fade-in takes the old section out over it', seam(chorus4, 'in'), { out: [-0.5, 0], in: [-0.5, 0] });
+same('a loop keeps its own seam whatever the jump setting', plan.seamFades(chorus2, chorus2, 14, steady, 'out'), { out: [-2.5, -1.5], in: [-2.5, -1.5] });
+same('going on to the next section plays straight through', seam(part(3, 14, {}), 'out'), null);
+same('a matched fade-in cannot start before the recording', plan.seamFades(chorus2, part(0, 1, {}), 14, steady, 'out')!.in, [-1, -1]);
 const chorus = map.sectionViews(s)[2];
 const sg = map.songGrid(s);
 same('next beat boundary', r3(plan.nextBoundary('beat', 17.3, chorus, sg, chorus.end)), 17.5);
@@ -203,6 +215,9 @@ same('fades run from their start to their end', [fadeOut[0], fadeOut.at(-1), fad
 same('a crossfade keeps its power steady', fadeOut.map((point, i) => r3(point.v ** 2 + fadeIn[i].v ** 2)), fadeOut.map(() => 1));
 same('half way through a crossfade, each side is 3 dB down', r3(fadeOut[8].v), 0.707);
 same('a fade can start partway', plan.fadeCurve(0.5, 0, 0, 1)[0].v, 0.5);
+const quiet = plan.fadeCurve(1, 0, 0, 6, plan.EVEN_LOUDNESS);
+same('a pause fade lowers heard loudness (gain^0.6) in a straight line', quiet.map(point => r3(point.v ** 0.6)), quiet.map((_, i) => r3(1 - i / 16)));
+same('half way through a pause fade, it is 10 dB down', Math.round(20 * Math.log10(quiet[8].v)), -10);
 
 // .djw round trip and v1 read.
 const text = djw.serializeDjw({ ...s, source: 'https://youtu.be/x', audioFile: '/tmp/a.mp3' }, { includeAudioPath: false });

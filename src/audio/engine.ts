@@ -1,13 +1,15 @@
 import type { Pad, Song } from '../types';
 import { getAudio } from '../lib/db';
-import { barBeatAt, barSeconds, beatPos, beatTime, sectionViews, songGrid, upper, type Grid, type SectionView } from '../lib/songMap';
-import { clockBoundary, decideNext, fadeCurve, fadeOutSpan, fadeOutStart, leadIn, nextBoundary, seamEnd, type Reason } from '../lib/performPlan';
+import { barBeatAt, barSeconds, beatPos, beatTime, keyOf, sectionViews, songGrid, upper, type Grid, type SectionView } from '../lib/songMap';
+import { EVEN_LOUDNESS, clockBoundary, decideNext, fadeCurve, fadeOutStart, leadIn, nextBoundary, seamEnd, seamFades, type FadeShape, type JumpFade, type Reason } from '../lib/performPlan';
 
 const COMMIT_AHEAD = 3;
 const MIN_RAMP = 0.005;
 
 interface Bus {
   ctx: AudioContext;
+  /** Song and pads together. The click does not go through it. */
+  main: GainNode;
   song: GainNode;
   pad: GainNode;
   click: GainNode;
@@ -53,7 +55,7 @@ export function audio(): Bus {
     main.connect(out);
     click.connect(out);
   }
-  bus = { ctx, song, pad, click, meter, ears };
+  bus = { ctx, main, song, pad, click, meter, ears };
   return bus;
 }
 
@@ -132,9 +134,9 @@ function valueAt(points: Points, t: number): number {
  * A linear ramp runs from the previous event, so the curve's first point pins the start. Without it, a fade
  * scheduled after the last ramp had finished ran from that ramp's end, and the gain dropped at once.
  */
-function fadeTo(fader: Fader, value: number, start: number, end: number) {
+function fadeTo(fader: Fader, value: number, start: number, end: number, shape?: FadeShape) {
   const param = fader.gain.gain;
-  const curve = fadeCurve(valueAt(fader.points, start), value, start, Math.max(end, start + MIN_RAMP));
+  const curve = fadeCurve(valueAt(fader.points, start), value, start, Math.max(end, start + MIN_RAMP), shape);
   param.cancelScheduledValues(start);
   for (const point of curve) param.linearRampToValueAtTime(point.v, point.t);
   fader.points = [...fader.points.filter(point => point.t < start), ...curve];
@@ -282,6 +284,9 @@ interface Segment {
   prevEndCtx: number;
   /** The previous segment's gain before this one faded it out. Revoking puts it back. */
   prevPoints: Points;
+  /** The pad that fills the silence between the previous segment's fade-out and this one's fade-in. */
+  gapPad?: Promise<PadVoice | null>;
+  /** Shared with the previous segment when the recording runs straight on into this one. */
   voice: Voice;
 }
 
@@ -350,6 +355,10 @@ export class PerformSession {
   /** Set by "End song now". Picks and hold no longer apply. */
   forced = false;
   onSongEnd: (() => void) | null = null;
+  /** How jumps between different sections line up their fades. */
+  jumpFade: JumpFade = 'edited';
+  /** Bring in a pad in the new section's key when a jump would leave silence. */
+  fillGaps = false;
   padSource: PadSource;
   pads: PadVoice[] = [];
   private fading: PadVoice[] = [];
@@ -357,6 +366,11 @@ export class PerformSession {
   private tails: Array<{ voice: Voice; end: number }> = [];
   private padTicket = 0;
   clock: PadClock | null = null;
+  /** True from the moment Pause is pressed, through the fade-out. */
+  paused = false;
+  /** When the fade-out is done and the audio clock stops. */
+  private suspendAt: number | null = null;
+  private master: Fader = { gain: audio().main, points: [{ t: now(), v: 1 }] };
   private timer: number;
 
   constructor(padSource: PadSource) {
@@ -373,14 +387,16 @@ export class PerformSession {
     this.segments = [];
     this.pads = [];
     this.fading = [];
-    void audio().ctx.resume();
+    // Other screens share the bus: leave it running and at full volume, even partway through a fade back in.
+    this.resume();
+    fadeTo(this.master, 1, now(), now());
   }
 
   startSong(ps: PerfSong, options: { from: number; landingCtx?: number; passes?: number; until?: number }) {
     for (const segment of this.segments) stop(segment.voice);
     for (const tail of this.tails) stop(tail.voice);
     this.tails = [];
-    void audio().ctx.resume();
+    this.resume();
     this.ps = ps;
     this.segments = [];
     this.planned = null;
@@ -452,21 +468,42 @@ export class PerformSession {
     this.forced = true;
   }
 
-  async pause() {
-    await audio().ctx.suspend();
-    for (const pad of [...this.pads, ...this.fading]) pad.el.pause();
+  /** Seconds in a bar now: the song's, else the pad clock's. */
+  barLen(): number {
+    const current = this.segments[0];
+    if (this.ps && current) return barSeconds(this.ps.grid, this.ps.views[current.idx].s);
+    return this.clock?.barLen ?? 2;
   }
 
-  async resume() {
-    await audio().ctx.resume();
+  /**
+   * Fade song and pads out over `bars`, then stop the audio clock, which holds every scheduled pass and fade.
+   * The set keeps moving while it fades, so it picks up where it went quiet.
+   */
+  pause(bars = 0) {
+    if (this.paused) return;
+    this.paused = true;
+    const t = now();
+    this.suspendAt = t + Math.max(MIN_RAMP, bars * this.barLen());
+    fadeTo(this.master, 0, t, this.suspendAt, EVEN_LOUDNESS);
+  }
+
+  /** Start the clock again and fade back in over `bars`. Mid fade-out, it turns back from the level it reached. */
+  resume(bars = 0) {
+    // Also wakes a context the browser started suspended. Calls to the context run in order, so this wins over a suspend still in flight.
+    void audio().ctx.resume();
+    if (!this.paused) return;
+    this.paused = false;
+    this.suspendAt = null;
     for (const pad of [...this.pads, ...this.fading]) void pad.el.play();
+    const t = now();
+    fadeTo(this.master, 1, t, t + bars * this.barLen(), EVEN_LOUDNESS);
   }
 
   /** Start or change the pad. The new pad fades in from `at` while the old one fades out. */
-  async setPad(tonic: number, at: number, fade: number) {
+  async setPad(tonic: number, at: number, fade: number): Promise<PadVoice | null> {
     const ticket = ++this.padTicket;
     const blob = await this.padSource(tonic);
-    if (!blob || ticket !== this.padTicket) return;
+    if (!blob || ticket !== this.padTicket) return null;
     const { ctx, pad: out } = audio();
     const el = new Audio(URL.createObjectURL(blob));
     el.loop = true;
@@ -482,7 +519,10 @@ export class PerformSession {
     ctx.createMediaElementSource(el).connect(gain).connect(out);
     await el.play().catch(() => undefined);
     const pad: PadVoice = { tonic, at, el, gain, points: [], until: Infinity };
-    if (ticket !== this.padTicket) return releasePad(pad);
+    if (ticket !== this.padTicket) {
+      releasePad(pad);
+      return null;
+    }
     const start = Math.max(at, now() + 0.02);
     pad.at = start;
     fadeTo(pad, 1, start, start + fade);
@@ -492,6 +532,13 @@ export class PerformSession {
     }
     this.fading.push(...this.pads);
     this.pads = [pad];
+    return pad;
+  }
+
+  private dropPad(pad: PadVoice) {
+    releasePad(pad);
+    this.pads = this.pads.filter(item => item !== pad);
+    this.fading = this.fading.filter(item => item !== pad);
   }
 
   /** Pad that fades in under the song at its next phrase. */
@@ -545,50 +592,62 @@ export class PerformSession {
     while (this.segments.length > 1) {
       const last = this.segments[this.segments.length - 1];
       if (t + 0.03 >= Math.min(last.startCtx, last.prevFadeCtx)) break;
+      this.segments.pop();
+      const prev = this.segments[this.segments.length - 1];
+      if (last.voice === prev.voice) continue;
       stop(last.voice);
       last.voice.gain.disconnect();
-      this.segments.pop();
-      restore(this.segments[this.segments.length - 1].voice, last.prevPoints, last.prevFadeCtx);
+      restore(prev.voice, last.prevPoints, last.prevFadeCtx);
+      if (last.gapPad) {
+        this.padTicket++;
+        void last.gapPad.then(pad => pad && this.dropPad(pad));
+      }
     }
+  }
+
+  private fades(from: Segment, idx: number, boundaryAudio: number) {
+    const ps = this.ps!;
+    return seamFades(ps.views[from.idx], ps.views[idx], boundaryAudio, ps.grid, this.jumpFade);
   }
 
   private enter(idx: number, pass: number, reason: Reason, landing: number, prev: Segment | null, boundaryAudio: number) {
     const ps = this.ps!;
     const view = ps.views[idx];
+    const seamAudio = seamEnd(view, ps.grid, ps.buffer.duration);
+    const fades = prev && this.fades(prev, idx, boundaryAudio);
+    if (prev && !fades) {
+      this.segments.push({ idx, pass, reason, landingCtx: landing, landingAudio: view.start, seamAudio, startCtx: landing, prevFadeCtx: landing, prevEndCtx: landing, prevPoints: prev.voice.points, voice: prev.voice });
+      return;
+    }
     const { audioStart, singerStart } = leadIn(view, ps.grid);
+    const into = fades?.in ?? [audioStart - view.start, singerStart - view.start];
     const t = now();
-    let startCtx = landing - (view.start - audioStart);
-    let offset = audioStart;
+    let startCtx = landing + into[0];
+    let offset = view.start + into[0];
     if (startCtx < t + 0.02) {
       const late = t + 0.02 - startCtx;
       startCtx += late;
       offset += late;
     }
     const voice = play(ps.buffer, audio().song, startCtx, offset);
-    fadeTo(voice, 1, startCtx, landing - (view.start - singerStart));
+    fadeTo(voice, 1, startCtx, landing + into[1]);
     let prevFadeCtx = Infinity;
     let prevEndCtx = landing;
     let prevPoints: Points = [];
-    if (prev) {
-      const fade = fadeOutSpan(ps.views[prev.idx], ps.grid, boundaryAudio);
-      prevFadeCtx = Math.max(t + 0.01, landing - (boundaryAudio - fade.start));
-      prevEndCtx = landing + (fade.end - boundaryAudio);
+    let gapPad: Promise<PadVoice | null> | undefined;
+    if (prev && fades) {
+      prevFadeCtx = Math.max(t + 0.01, landing + fades.out[0]);
+      prevEndCtx = landing + fades.out[1];
       prevPoints = prev.voice.points;
       fadeTo(prev.voice, 0, prevFadeCtx, prevEndCtx);
+      const tonic = keyOf(view.key)?.tonic;
+      // The pad rises as the old pass fades and falls as the new one comes in.
+      if (this.fillGaps && tonic !== undefined && fades.out[1] < fades.in[0] - 0.01 && this.pads.length === 0) {
+        gapPad = this.setPad(tonic, prevFadeCtx, Math.max(0.25, prevEndCtx - prevFadeCtx));
+        void gapPad.then(pad => pad && this.pads[0] === pad && this.fadePads(startCtx, landing + into[1]));
+      }
     }
-    this.segments.push({
-      idx,
-      pass,
-      reason,
-      landingCtx: landing,
-      landingAudio: view.start,
-      seamAudio: seamEnd(view, ps.grid, ps.buffer.duration),
-      startCtx,
-      prevFadeCtx,
-      prevEndCtx,
-      prevPoints,
-      voice,
-    });
+    this.segments.push({ idx, pass, reason, landingCtx: landing, landingAudio: view.start, seamAudio, startCtx, prevFadeCtx, prevEndCtx, prevPoints, gapPad, voice });
   }
 
   private decide(tail: Segment): Exclude<Planned, null> {
@@ -620,6 +679,11 @@ export class PerformSession {
   tick() {
     const t = now();
     const ps = this.ps;
+    if (this.suspendAt !== null && t >= this.suspendAt) {
+      this.suspendAt = null;
+      void audio().ctx.suspend();
+      for (const pad of [...this.pads, ...this.fading]) pad.el.pause();
+    }
     const done = this.fading.filter(pad => t >= pad.until);
     if (done.length) {
       done.forEach(releasePad);
@@ -628,6 +692,7 @@ export class PerformSession {
     if (!ps || this.segments.length === 0) return;
     while (this.segments.length > 1 && t >= this.segments[1].landingCtx) {
       const old = this.segments.shift()!;
+      if (old.voice === this.segments[0].voice) continue;
       const end = Math.max(t, this.segments[0].prevEndCtx) + 0.1;
       stop(old.voice, end);
       this.tails = [...this.tails.filter(tail => tail.end > t), { voice: old.voice, end }];
@@ -638,8 +703,9 @@ export class PerformSession {
       this.planned = planned;
       if (planned === 'end') break;
       const landing = tail.landingCtx + (planned.boundaryAudio - tail.landingAudio);
-      const view = ps.views[planned.idx];
-      if (t < landing - (view.start - leadIn(view, ps.grid).audioStart) - COMMIT_AHEAD) break;
+      // Commit before the first fade starts, so even a long fade-out plays in full.
+      const fades = this.fades(tail, planned.idx, planned.boundaryAudio);
+      if (t < landing + (fades ? Math.min(fades.in[0], fades.out[0]) : 0) - COMMIT_AHEAD) break;
       const { idx, pass, reason, boundaryAudio } = planned;
       this.planned = null;
       this.enter(idx, pass, reason, landing, tail, boundaryAudio);
@@ -746,7 +812,7 @@ export class PerformSession {
       };
     }
     return {
-      paused: audio().ctx.state === 'suspended',
+      paused: this.paused,
       song,
       pad:
         sounding || coming

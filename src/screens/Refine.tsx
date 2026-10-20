@@ -153,7 +153,8 @@ function Seam({ song, view, onChange }: { song: Song; view: SectionView; onChang
 
   return (
     <div className="mt-8">
-      <p className="mb-2 font-medium">Loop seam</p>
+      <p className="font-medium">Loop seam</p>
+      <p className="mb-2 text-sm text-muted">How this section loops back to its own start. In Perform, going on to the next section plays straight through, and jumps to another section follow the Jumps setting there.</p>
       <SeamView grid={grid} buffer={buffer} view={view} seam={seam} before={before} after={after} bar={bar} rel={rel} onHold={setHeld} onChange={onChange} />
 
       <div className="mt-4 flex flex-wrap gap-x-8 gap-y-5">
