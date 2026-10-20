@@ -420,10 +420,29 @@ export function markSection(song: Song, type: SectionType, at: number, name?: st
 
 export function moveSection(song: Song, id: string, bars: number): Song {
   const d = songGrid(song).downbeats;
-  const view = sectionViews(song).find(item => item.section.id === id);
-  if (!view) return song;
-  const s = Math.min(d.length - 1, Math.max(0, view.s + bars));
+  const views = sectionViews(song);
+  const i = views.findIndex(item => item.section.id === id);
+  if (i < 0) return song;
+  // It stops a bar short of its neighbours, since two sections on one bar collapse into one.
+  const s = Math.min(views[i + 1] ? views[i + 1].s - 1 : d.length - 1, Math.max(views[i - 1] ? views[i - 1].s + 1 : 0, views[i].s + bars));
+  if (s === views[i].s) return song;
   return { ...song, sections: song.sections.map(item => (item.id === id ? { ...item, at: d[s] } : item)) };
+}
+
+/** Where a cut at `t` lands: the nearest bar, if it falls inside a section rather than on its edge. */
+export function cutBar(song: Song, t: number): { view: SectionView; bar: number } | null {
+  const view = sectionViews(song).find(item => t >= item.start && t < item.end);
+  const bar = nearestIndex(songGrid(song).downbeats, t);
+  return view && bar > view.s && bar < view.e ? { view, bar } : null;
+}
+
+/** Splits a section at the bar nearest `t`. The second half keeps the label and a key set by hand; its pickup, fades and repeats start fresh. */
+export function cutSection(song: Song, t: number): Song {
+  const cut = cutBar(song, t);
+  if (!cut) return song;
+  const { type, name, key } = cut.view.section;
+  const at = songGrid(song).downbeats[cut.bar];
+  return { ...song, sections: [...song.sections, { id: uid(), type, name, key, at, ...DEFAULT_SECTION }] };
 }
 
 export function clock(seconds: number): string {

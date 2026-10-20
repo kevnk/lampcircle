@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent } from 'react';
-import { ChevronLeft, ChevronRight, Pause, Play, Undo2, X } from 'lucide-react';
-import type { SectionType, Song, Tap } from '../types';
+import { ChevronLeft, ChevronRight, MousePointer2, Pause, Play, Scissors, Undo2, X } from 'lucide-react';
+import type { Section, SectionType, Song, Tap } from '../types';
 import { go, useStore } from '../store';
-import { Button, Card, LinkButton, Menu, MenuItem, SongHeader, StepPills, shadeClass, useFrame, useKeys, type StepName } from '../ui';
+import { Button, Card, LinkButton, Menu, MenuItem, SongHeader, StepPills, Stepper, beatsLabel, shadeClass, useFrame, useKeys, type StepName } from '../ui';
 import { transport } from '../audio/engine';
 import { KEY_NAMES, detectKey, keyName } from '../lib/music';
 import { sectionChroma, snapToOnset, type Onsets } from '../lib/analysis';
@@ -12,8 +12,12 @@ import {
   SECTION_TYPES,
   barBeatAt,
   barSeconds,
+  beatPos,
+  beatTime,
   bpmOf,
   clock,
+  cutBar,
+  cutSection,
   liveBpm,
   mapTaps,
   markSection,
@@ -23,6 +27,12 @@ import {
   unmarked,
   type SectionView,
 } from '../lib/songMap';
+
+type Tool = 'select' | 'cut';
+const TOOLS = [
+  ['select', 'Select', MousePointer2, 'V', 'Click a section to change it'],
+  ['cut', 'Cut', Scissors, 'C', 'Click a section to split it at the nearest bar'],
+] as const;
 
 export function stepNav(song: Song) {
   return (step: StepName) => go({ page: 'song', id: song.id, step: step === 'sections' ? 'tap' : step });
@@ -46,6 +56,9 @@ export function SongTap({ song }: { song: Song }) {
   const [hint, setHint] = useState<string | null>(null);
   /** Re-tapping: taps outside [start, end) are ignored, each new tap replaces the old taps before it, and playback stops at `stop`. */
   const [retap, setRetap] = useState<{ label: string; start: number; end: number; stop: number; half: number; fresh: Set<Tap> } | null>(null);
+  const [tool, setTool] = useState<Tool>('select');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
   const latest = useRef(song);
   latest.current = song;
   const history = useRef<Song[]>([]);
@@ -71,7 +84,17 @@ export function SongTap({ song }: { song: Song }) {
     if (!playing) setRetap(null);
   }, [playing]);
 
+  useEffect(() => {
+    if (!selectedId) return;
+    const close = (event: MouseEvent) => {
+      if (!trackRef.current?.contains(event.target as Node)) setSelectedId(null);
+    };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [selectedId]);
+
   const save = (next: Song, undoable = true) => {
+    if (next === latest.current) return;
     if (undoable) history.current = [...history.current.slice(-199), latest.current];
     latest.current = next;
     store.saveSong(next);
@@ -91,6 +114,11 @@ export function SongTap({ song }: { song: Song }) {
   // Before any taps, left and right step 5 seconds.
   const bars = grid.downbeats.length ? grid.downbeats : Array.from({ length: Math.ceil(song.duration / 5) }, (_, i) => i * 5);
   const starts = [...views.map(view => view.start), ...(rest ? [rest.start] : [])];
+  const selected = views.find(view => view.section.id === selectedId);
+  const pickTool = (next: Tool) => {
+    setTool(next);
+    setSelectedId(null);
+  };
 
   useEffect(() => {
     if (!transport.playing) return;
@@ -164,6 +192,10 @@ export function SongTap({ song }: { song: Song }) {
       event.preventDefault();
       transport.toggle();
       setHint(null);
+    } else if (event.key === 'v' || event.key === 'c') {
+      pickTool(event.key === 'v' ? 'select' : 'cut');
+    } else if (event.key === 'Escape') {
+      setSelectedId(null);
     } else if (event.key === '0' || event.key === 'Home') {
       event.preventDefault();
       transport.seek(0);
@@ -191,6 +223,21 @@ export function SongTap({ song }: { song: Song }) {
             {at && at.bar > 0 ? ` · bar ${at.bar} · beat ${at.beat}` : ''}
           </p>
           <div className="ml-auto flex items-center gap-1">
+            <div className="mr-2 inline-flex rounded-md border border-line p-0.5" role="group" aria-label="Section tool">
+              {TOOLS.map(([value, label, Icon, key, help]) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={tool === value}
+                  title={`${help} (${key})`}
+                  className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-sm ${tool === value ? 'bg-ink text-white' : 'hover:bg-paper'}`}
+                  onClick={() => pickTool(value)}
+                >
+                  <Icon className="h-4 w-4" aria-hidden />
+                  {label}
+                </button>
+              ))}
+            </div>
             <button
               type="button"
               className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 hover:bg-paper disabled:text-faint disabled:hover:bg-transparent"
@@ -242,8 +289,23 @@ export function SongTap({ song }: { song: Song }) {
             </Menu>
           </div>
         </div>
-        <Track song={song} views={views} pos={pos} restStart={rest?.start ?? null} onSeek={t => transport.seek(t)} />
-        <p className="mt-3 text-right text-xs text-muted">← → bar · ↑ ↓ section · 0 or Home start of song · Enter play or pause · Backspace undo</p>
+        <div ref={trackRef} className="relative">
+          <Track
+            song={song}
+            views={views}
+            pos={pos}
+            restStart={rest?.start ?? null}
+            onSeek={t => transport.seek(t)}
+            tool={tool}
+            selectedId={selected?.section.id ?? null}
+            onSelect={setSelectedId}
+            onCut={t => save(cutSection(latest.current, t))}
+          />
+          {selected && <SectionInspector song={song} view={selected} save={save} loaded={loaded} onRetap={() => retapSection(selected)} onClose={() => setSelectedId(null)} />}
+        </div>
+        <p className="mt-3 text-right text-xs text-muted">
+          V select · C cut · ← → bar · ↑ ↓ section · 0 or Home start of song · Enter play or pause · Backspace undo
+        </p>
       </Card>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,354px)_minmax(0,1fr)]">
@@ -333,7 +395,7 @@ export function SongTap({ song }: { song: Song }) {
             </thead>
             <tbody>
               {views.map(view => (
-                <SectionRow key={view.section.id} song={song} view={view} save={save} loaded={loaded} onRetap={() => retapSection(view)} />
+                <SectionRow key={view.section.id} song={song} view={view} save={save} loaded={loaded} selected={view === selected} onRetap={() => retapSection(view)} />
               ))}
               {rest && (
                 <tr className="border-b border-line text-muted">
@@ -365,52 +427,142 @@ export function SongTap({ song }: { song: Song }) {
   );
 }
 
-function SectionRow({ song, view, save, loaded, onRetap }: { song: Song; view: SectionView; save: (song: Song) => void; loaded: boolean; onRetap: () => void }) {
-  const detected = detectKey(sectionChroma(song.chroma, view.start, view.end));
-  const found = detected ? keyName(detected) : null;
-  const setKey = (key: string) =>
-    save({ ...song, sections: song.sections.map(item => (item.id === view.section.id ? { ...item, key: key || undefined } : item)) });
+interface Edit {
+  song: Song;
+  view: SectionView;
+  save: (song: Song) => void;
+}
+
+function patched(song: Song, view: SectionView, patch: Partial<Section>): Song {
+  return { ...song, sections: song.sections.map(item => (item.id === view.section.id ? { ...item, ...patch } : item)) };
+}
+
+function TypeSelect({ song, view, save }: Edit) {
   const setType = (type: SectionType) => {
     const name = type === 'custom' ? window.prompt('Name this section', view.section.name ?? '')?.trim() : undefined;
     if (type === 'custom' && !name) return;
-    save({ ...song, sections: song.sections.map(item => (item.id === view.section.id ? { ...item, type, name } : item)) });
+    save(patched(song, view, { type, name }));
   };
   return (
-    <tr className="border-b border-line">
-      <td className="py-2">
-        <select
-          aria-label={`Label of ${view.name}`}
-          value={view.section.type}
-          onChange={event => setType(event.target.value as SectionType)}
-          title="Change the label"
-          className="-ml-1 cursor-pointer appearance-none rounded bg-transparent px-1 py-0.5 font-medium [field-sizing:content] hover:bg-paper"
+    <select
+      aria-label={`Label of ${view.name}`}
+      value={view.section.type}
+      onChange={event => setType(event.target.value as SectionType)}
+      title="Change the label"
+      className="-ml-1 cursor-pointer appearance-none rounded bg-transparent px-1 py-0.5 font-medium [field-sizing:content] hover:bg-paper"
+    >
+      {SECTION_TYPES.map(item => (
+        <option key={item.type} value={item.type}>
+          {item.type === view.section.type ? view.name : item.label}
+        </option>
+      ))}
+      <option value="custom">{view.section.type === 'custom' ? view.name : 'Custom…'}</option>
+    </select>
+  );
+}
+
+function KeySelect({ song, view, save }: Edit) {
+  const detected = detectKey(sectionChroma(song.chroma, view.start, view.end));
+  const found = detected ? keyName(detected) : null;
+  return (
+    <select
+      aria-label={`Key of ${view.name}`}
+      value={view.section.key ?? ''}
+      onChange={event => save(patched(song, view, { key: event.target.value || undefined }))}
+      title="Change the key"
+      className="-ml-1 cursor-pointer appearance-none rounded bg-transparent px-1 py-0.5 font-mono hover:bg-paper"
+    >
+      <option value="">{found ?? '—'}</option>
+      {KEY_NAMES.flatMap(name => [name, `${name}m`]).map(name => (
+        <option key={name} value={name}>
+          {name} (set by me)
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** The Select tool's panel for one section, under the track. */
+function SectionInspector({ song, view, save, loaded, onRetap, onClose }: Edit & { loaded: boolean; onRetap: () => void; onClose: () => void }) {
+  const center = ((view.start + view.end) / 2 / (song.duration || 1)) * 100;
+  const { pickupBeats } = view.section;
+  const icon = 'rounded p-1 text-muted hover:bg-paper hover:text-ink';
+  const action = 'inline-flex items-center gap-1.5 rounded px-2 py-1 hover:bg-paper disabled:text-faint';
+  return (
+    <div
+      role="dialog"
+      aria-label={`${view.name} settings`}
+      className="absolute top-full z-20 mt-2 w-80 rounded-md border border-line bg-white p-4 shadow-lg"
+      style={{ left: `clamp(0px, calc(${center}% - 10rem), calc(100% - 20rem))` }}
+    >
+      <div className="mb-3 flex items-center gap-2">
+        <TypeSelect song={song} view={view} save={save} />
+        <span className="font-mono text-xs text-muted">
+          bars {view.s + 1}–{view.e}
+        </span>
+        <button type="button" className={`ml-auto ${icon}`} aria-label="Close" onClick={onClose}>
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-3 text-sm">
+        <span className="text-muted">Starts on</span>
+        <div className="flex items-center gap-1 font-mono">
+          <button type="button" className={icon} aria-label={`Move ${view.name} a bar earlier`} onClick={() => save(moveSection(song, view.section.id, -1))}>
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          bar {view.s + 1}
+          <button type="button" className={icon} aria-label={`Move ${view.name} a bar later`} onClick={() => save(moveSection(song, view.section.id, 1))}>
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        <span className="text-muted">Pickup</span>
+        <Stepper name="pickup" value={pickupBeats} min={0} max={16} step={0.5} label={beatsLabel(pickupBeats)} onChange={value => save(patched(song, view, { pickupBeats: value }))} />
+        <p className="col-span-2 -mt-1.5 text-xs text-muted">Beats it starts before bar {view.s + 1}, for a vocal lead-in.</p>
+        <span className="text-muted">Key</span>
+        <div>
+          <KeySelect song={song} view={view} save={save} />
+        </div>
+      </div>
+      <div className="mt-4 flex items-center gap-1 border-t border-line pt-3 text-sm">
+        <button
+          type="button"
+          className={action}
+          disabled={!loaded}
+          onClick={() => {
+            transport.seek(view.start);
+            transport.play();
+          }}
         >
-          {SECTION_TYPES.map(item => (
-            <option key={item.type} value={item.type}>
-              {item.type === view.section.type ? view.name : item.label}
-            </option>
-          ))}
-          <option value="custom">{view.section.type === 'custom' ? view.name : 'Custom…'}</option>
-        </select>
+          <Play className="h-4 w-4" aria-hidden />
+          Play
+        </button>
+        <button type="button" className={action} title="Play this section and tap it again" disabled={!loaded} onClick={onRetap}>
+          Re-tap
+        </button>
+        <button
+          type="button"
+          className={`ml-auto text-accent ${action}`}
+          title="Its bars join the section before it"
+          onClick={() => save({ ...song, sections: song.sections.filter(item => item.id !== view.section.id) })}
+        >
+          Remove
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SectionRow({ song, view, save, loaded, selected, onRetap }: Edit & { loaded: boolean; selected: boolean; onRetap: () => void }) {
+  return (
+    <tr className={`border-b border-line ${selected ? 'bg-accent-soft' : ''}`}>
+      <td className="py-2">
+        <TypeSelect song={song} view={view} save={save} />
         <span className="ml-2 font-mono text-xs text-muted">
           bars {view.s + 1}–{view.e}
         </span>
       </td>
       <td className="py-2">
-        <select
-          aria-label={`Key of ${view.name}`}
-          value={view.section.key ?? ''}
-          onChange={event => setKey(event.target.value)}
-          title="Change the key"
-          className="-ml-1 cursor-pointer appearance-none rounded bg-transparent px-1 py-0.5 font-mono hover:bg-paper"
-        >
-          <option value="">{found ?? '—'}</option>
-          {KEY_NAMES.flatMap(name => [name, `${name}m`]).map(name => (
-            <option key={name} value={name}>
-              {name} (set by me)
-            </option>
-          ))}
-        </select>
+        <KeySelect song={song} view={view} save={save} />
       </td>
       <td className="py-2">
         <div className="flex items-center justify-end text-muted">
@@ -458,9 +610,36 @@ function SectionRow({ song, view, save, loaded, onRetap }: { song: Song; view: S
 
 const BARS = 170;
 
-function Track({ song, views, pos, restStart, onSeek }: { song: Song; views: SectionView[]; pos: number; restStart: number | null; onSeek: (t: number) => void }) {
+function Track({
+  song,
+  views,
+  pos,
+  restStart,
+  onSeek,
+  tool,
+  selectedId,
+  onSelect,
+  onCut,
+}: {
+  song: Song;
+  views: SectionView[];
+  pos: number;
+  restStart: number | null;
+  onSeek: (t: number) => void;
+  tool: Tool;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  onCut: (t: number) => void;
+}) {
   const grid = songGrid(song);
   const duration = song.duration || 1;
+  const strip = useRef<HTMLDivElement>(null);
+  const [hover, setHover] = useState<number | null>(null);
+  const timeAt = (clientX: number) => {
+    const rect = strip.current!.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)) * duration;
+  };
+  const cut = tool === 'cut' && hover !== null ? cutBar(song, hover) : null;
   const bars = useMemo(() => {
     const out: number[] = [];
     const size = song.peaks.length / BARS;
@@ -495,56 +674,106 @@ function Track({ song, views, pos, restStart, onSeek }: { song: Song; views: Sec
           </span>
         ))}
       </div>
-      <div
-        className="relative cursor-pointer touch-none select-none"
-        role="slider"
-        aria-label="Song position"
-        aria-valuemin={0}
-        aria-valuemax={Math.round(duration)}
-        aria-valuenow={Math.round(pos)}
-        aria-valuetext={clock(pos)}
-        tabIndex={0}
-        onPointerDown={event => {
-          event.currentTarget.setPointerCapture(event.pointerId);
-          seekAt(event);
-        }}
-        onPointerMove={event => {
-          if (event.buttons === 1) seekAt(event);
-        }}
-      >
-        <svg viewBox={`0 0 ${BARS * 6} 120`} preserveAspectRatio="none" className="block h-[120px] w-full bg-wave-bg">
-          {bars.map((peak, i) => (
-            <rect key={i} x={i * 6 + 1} width={4} y={60 - peak * 56} height={peak * 112} fill={i / BARS < played ? '#1C1C1A' : '#A6A6A0'} />
-          ))}
-        </svg>
-        <svg viewBox="0 0 1000 14" preserveAspectRatio="none" className="mt-1 block h-3.5 w-full" aria-hidden>
-          {ticks.map((tick, i) => (
-            <line key={i} x1={tick.x} x2={tick.x} y1={tick.tall ? 0 : 4} y2={14} stroke={tick.color} strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
-          ))}
-        </svg>
-        <div className="relative mt-1 h-8">
+      <div className="relative">
+        <div
+          className="cursor-pointer touch-none select-none"
+          role="slider"
+          aria-label="Song position"
+          aria-valuemin={0}
+          aria-valuemax={Math.round(duration)}
+          aria-valuenow={Math.round(pos)}
+          aria-valuetext={clock(pos)}
+          tabIndex={0}
+          onPointerDown={event => {
+            event.currentTarget.setPointerCapture(event.pointerId);
+            seekAt(event);
+          }}
+          onPointerMove={event => {
+            // Only a drag that started on the waveform seeks, not one that wandered in from a section.
+            if (event.currentTarget.hasPointerCapture(event.pointerId)) seekAt(event);
+          }}
+        >
+          <svg viewBox={`0 0 ${BARS * 6} 120`} preserveAspectRatio="none" className="block h-[120px] w-full bg-wave-bg">
+            {bars.map((peak, i) => (
+              <rect key={i} x={i * 6 + 1} width={4} y={60 - peak * 56} height={peak * 112} fill={i / BARS < played ? '#1C1C1A' : '#A6A6A0'} />
+            ))}
+          </svg>
+          <svg viewBox="0 0 1000 14" preserveAspectRatio="none" className="mt-1 block h-3.5 w-full" aria-hidden>
+            {ticks.map((tick, i) => (
+              <line key={i} x1={tick.x} x2={tick.x} y1={tick.tall ? 0 : 4} y2={14} stroke={tick.color} strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
+            ))}
+          </svg>
+        </div>
+        <div
+          ref={strip}
+          className="relative mt-1 h-8"
+          onPointerMove={event => tool === 'cut' && setHover(timeAt(event.clientX))}
+          onPointerLeave={() => setHover(null)}
+        >
           {views.map(view => {
             const width = ((view.end - view.start) / duration) * 100;
+            const selected = view.section.id === selectedId;
+            const pointer =
+              tool === 'cut'
+                ? cut?.view.section.id === view.section.id
+                  ? 'cursor-crosshair'
+                  : 'cursor-not-allowed'
+                : selected
+                  ? 'ring-2 ring-inset ring-accent'
+                  : 'hover:ring-2 hover:ring-inset hover:ring-accent/60';
             return (
-              <div
+              <button
                 key={view.section.id}
-                className={`absolute inset-y-0 flex items-center justify-center overflow-hidden border-r-2 border-white font-mono text-xs ${shadeClass(view)}`}
+                type="button"
+                className={`absolute inset-y-0 flex items-center justify-center overflow-hidden border-r-2 border-white font-mono text-xs ${shadeClass(view)} ${pointer}`}
                 style={{ left: `${(view.start / duration) * 100}%`, width: `${width}%` }}
                 title={`${view.name} · bars ${view.s + 1}–${view.e}`}
+                aria-label={`${view.name}, bars ${view.s + 1}–${view.e}`}
+                aria-pressed={tool === 'select' ? selected : undefined}
+                // A click without a pointer (a screen reader) cuts at the middle of the section.
+                onClick={event => (tool === 'cut' ? onCut(event.detail ? timeAt(event.clientX) : (view.start + view.end) / 2) : onSelect(selected ? null : view.section.id))}
               >
                 {width > 6 ? view.name.replace(/^Chorus/, 'Ch').replace(/^Verse /, 'V') : view.short}
-              </div>
+              </button>
             );
           })}
+          {views
+            .filter(view => view.section.pickupBeats > 0)
+            .map(view => {
+              const from = Math.max(0, beatTime(grid, beatPos(grid, view.start) - view.section.pickupBeats));
+              return (
+                <div
+                  key={`pickup-${view.section.id}`}
+                  className="pointer-events-none absolute top-0 h-1.5 bg-accent"
+                  style={{ left: `${(from / duration) * 100}%`, width: `${((view.start - from) / duration) * 100}%` }}
+                  data-pickup={view.name}
+                  aria-hidden
+                />
+              );
+            })}
           {restStart !== null && (
             <div
-              className="hatch absolute inset-y-0 flex items-center justify-center border border-dashed border-faint font-mono text-xs text-muted"
+              className={`hatch absolute inset-y-0 flex items-center justify-center border border-dashed border-faint font-mono text-xs text-muted ${tool === 'cut' ? 'cursor-not-allowed' : ''}`}
               style={{ left: `${(restStart / duration) * 100}%`, right: 0 }}
+              onClick={() => onSelect(null)}
             >
               unmarked
             </div>
           )}
         </div>
+        {cut && (
+          <div
+            className="pointer-events-none absolute -top-1 bottom-0 border-l-2 border-dashed border-accent"
+            style={{ left: `${(grid.downbeats[cut.bar] / duration) * 100}%` }}
+            data-cut-bar={cut.bar + 1}
+            aria-hidden
+          >
+            <span className="absolute left-1 top-1 flex items-center gap-1 whitespace-nowrap rounded bg-accent px-1.5 py-0.5 font-mono text-[11px] text-white">
+              <Scissors className="h-3 w-3" />
+              bar {cut.bar + 1}
+            </span>
+          </div>
+        )}
         <div className="pointer-events-none absolute -top-1 bottom-0 w-0.5 bg-accent" style={{ left: `${played * 100}%` }} aria-hidden />
       </div>
     </div>

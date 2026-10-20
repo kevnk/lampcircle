@@ -166,6 +166,12 @@ s = map.markSection(s, 'bridge', views[4].start + 0.1);
 same('marking an existing bar replaces its type', map.sectionViews(s)[4].name, 'Bridge');
 s = map.moveSection(s, map.sectionViews(s)[4].section.id, -1);
 same('moving a section by a bar', map.sectionViews(s)[4].s, 15);
+same('moving stops a bar short of the next section', map.sectionViews(map.moveSection(s, map.sectionViews(s)[3].section.id, 5)).map(v => v.s), [0, 4, 8, 14, 15, 20]);
+const bridge = map.sectionViews(s)[4];
+same('no cut on the edge of a section', map.cutBar(s, bridge.start + 0.1), null);
+const cut = map.cutSection(s, map.songGrid(s).downbeats[17] - 0.3);
+same('cutting splits a section at the nearest bar', map.sectionViews(cut).map(v => [v.name, v.s, v.e]).slice(4, 6), [['Bridge 1', 15, 17], ['Bridge 2', 17, 20]]);
+same('the second half starts fresh', map.sectionViews(cut)[5].section.pickupBeats, 0);
 
 // Perform scheduling.
 const g = map.buildGrid([0, 0.5, 1, 1.5, 2, 2.6, 3.2, 3.8, 4.4].map((t, i) => ({ t, one: i % 4 === 0 })), 4, 6, false);

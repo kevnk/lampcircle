@@ -25,8 +25,9 @@ for (const key of ['A', 'A#', 'B', 'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G
 }
 copyFileSync(join(work, 'song-b.wav'), join(work, 'Evening Test.wav'));
 
-const HELPER = 3911;
-const WEB = 43911;
+// Two sessions can run this at once on their own ports.
+const HELPER = Number(process.env.E2E_HELPER_PORT || 3911);
+const WEB = Number(process.env.E2E_WEB_PORT || 43911);
 const env = { ...process.env, HELPER_PORT: String(HELPER), PORT: String(WEB) };
 const children: ChildProcess[] = [
   spawn('node', ['server/index.js'], {
@@ -209,6 +210,63 @@ async function main() {
     await press('Backspace');
     await waitFor(`document.querySelector('select[aria-label="Label of Verse 2"]')`, 'Backspace undoes the relabel');
 
+    // Select tool: click a section on the track to change its pickup, label and start bar.
+    const onStrip = (name: string) => `document.querySelector('button[aria-label^="${name}, bars"]')`;
+    const inPanel = (label: string) => `document.querySelector('[role=dialog] [aria-label="${label}"]')`;
+    const stripCount = `document.querySelectorAll('button[aria-label*=", bars"]').length`;
+    const playhead = await ev<number>('__djw.engine.transport.position()');
+    await clickAt(onStrip('Chorus 1'));
+    await waitFor(`document.querySelector('[role=dialog][aria-label="Chorus 1 settings"]')`, 'select opens a section from the track');
+    check('clicking a section does not move the playhead', (await ev<number>('__djw.engine.transport.position()')) === playhead);
+    for (let i = 0; i < 4; i++) await clickAt(inPanel('More pickup'));
+    const pickupShare = `(() => { const bar = document.querySelector('[data-pickup="Chorus 1"]'); return bar && bar.getBoundingClientRect().width / bar.parentElement.getBoundingClientRect().width; })()`;
+    await waitFor(`document.querySelector('[role=dialog]').innerText.includes('2 beats') && ${pickupShare}`, 'the pickup shows on the track');
+    check('the pickup on the track is 2 beats long', Math.abs((await ev<number>(pickupShare)) - 1 / 50) < 0.002, await ev(pickupShare));
+    await ev(`(() => { const s = document.querySelector('[role=dialog] select[aria-label^="Label of"]'); s.value = 'bridge'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waitFor(`document.querySelector('[role=dialog][aria-label="Bridge settings"]')`, 'the panel relabels the section');
+    for (let i = 0; i < 6; i++) await clickAt(inPanel('Move Bridge a bar later'));
+    await waitFor(`document.querySelector('[role=dialog]').innerText.includes('bars 12–12')`, 'moving a start stops a bar short of the next section');
+    check('moving never stacks two sections on one bar', (await ev<number>(stripCount)) === 6);
+    await shot('2b-tap-select');
+    await clickAt(`[...document.querySelectorAll('h2')].find(h => h.textContent.includes('Tap the beat'))`);
+    await waitFor(`!document.querySelector('[role=dialog]')`, 'clicking outside closes the panel');
+    for (let i = 0; i < 8; i++) await press('Backspace');
+    await waitFor(`!document.querySelector('[data-pickup]') && document.body.innerText.includes('bars 9–12')`, 'Backspace undoes the panel changes');
+    check('labels are back after undo', JSON.stringify(await labels()) === JSON.stringify(names), await labels());
+    await clickAt(onStrip('Verse 2'));
+    await press('Escape');
+    await waitFor(`!document.querySelector('[role=dialog]')`, 'Escape closes the panel');
+
+    // Cut tool: hover shows the nearest bar inside a section, a click splits there.
+    await press('c');
+    check('C picks the cut tool', (await ev<boolean>(`document.querySelector('[title^="Click a section to split"]').getAttribute('aria-pressed') === 'true'`)) === true);
+    const stripAt = (t: number) =>
+      ev<{ x: number; y: number }>(
+        `(() => { const strip = ${onStrip('Outro')}.parentElement; strip.scrollIntoView({ block: 'center' }); const r = strip.getBoundingClientRect(); return { x: r.left + (r.width * ${t}) / __djw.engine.transport.buffer.duration, y: r.top + r.height / 2 }; })()`,
+      );
+    const cutBarShown = `document.querySelector('[data-cut-bar]')?.dataset.cutBar ?? null`;
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...(await stripAt(bar1 + 40.1)), button: 'none' });
+    check('no cut on the edge of a section', (await ev(cutBarShown)) === null, await ev(cutBarShown));
+    const point = await stripAt(bar1 + 44.6);
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point, button: 'none' });
+    await waitFor(`${cutBarShown} === '23'`, 'hovering in cut mode shows the nearest bar');
+    await shot('2c-tap-cut');
+    const held = await ev<number>('__djw.engine.transport.position()');
+    const wave = { x: point.x - 300, y: point.y - 60 };
+    await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...wave, button: 'left', buttons: 1 });
+    await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...wave, button: 'left', clickCount: 1 });
+    check('a drag from a section into the waveform does not seek', (await ev<number>('__djw.engine.transport.position()')) === held && (await ev<number>(stripCount)) === 6);
+    for (const type of ['mousePressed', 'mouseReleased'] as const) await page.send('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 });
+    await waitFor(`${stripCount} === 7`, 'a cut splits the section');
+    check('the cut lands on the nearest bar', (await text()).includes('bars 21–22') && (await text()).includes('bars 23–25'));
+    check('both halves keep the label', JSON.stringify((await labels()).slice(5)) === JSON.stringify(['Outro 1', 'Outro 2']), await labels());
+    await press('Backspace');
+    await waitFor(`${stripCount} === 6`, 'Backspace undoes the cut');
+    await ev(`${onStrip('Outro')}.click()`);
+    await waitFor(`${stripCount} === 7`, 'a click without a pointer cuts the middle of the section');
+    await press('Backspace');
+    await press('v');
 
     // Start over, then undo it.
     await click('Start over');
