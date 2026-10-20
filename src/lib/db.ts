@@ -1,73 +1,158 @@
-import { openDB, DBSchema, IDBPDatabase } from 'idb';
-import { Song, SetlistItem } from '../types';
+import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+import type { Pad, Section, Song, Tap, WorshipSet } from '../types';
+import { DEFAULT_SECTION, typeFromName, uid } from './songMap';
 
-interface WorshipDB extends DBSchema {
-  songs: {
-    key: string;
-    value: Song;
-    indexes: { 'by-date': number };
-  };
-  setlist: {
-    key: string;
-    value: SetlistItem;
-    indexes: { 'by-order': number };
-  };
+interface Schema extends DBSchema {
+  songs: { key: string; value: Song };
+  pads: { key: string; value: Pad };
+  sets: { key: string; value: WorshipSet };
+  audio: { key: string; value: Blob };
 }
 
-let db: IDBPDatabase<WorshipDB> | null = null;
+let ready: Promise<IDBPDatabase<Schema>> | null = null;
 
-export async function initDB() {
-  if (db) return db;
-  
-  db = await openDB<WorshipDB>('worship-looper', 1, {
-    upgrade(db) {
-      const songStore = db.createObjectStore('songs', { keyPath: 'id' });
-      songStore.createIndex('by-date', 'dateAdded');
-      
-      const setlistStore = db.createObjectStore('setlist', { keyPath: 'id' });
-      setlistStore.createIndex('by-order', 'order');
+function db(): Promise<IDBPDatabase<Schema>> {
+  ready ??= openDB<Schema>('worship-looper', 2, {
+    blocked() {
+      window.alert('Close other tabs of this app, then reload, so your library can upgrade.');
+    },
+    async upgrade(database, oldVersion, _newVersion, tx) {
+      try {
+        await migrate(database, oldVersion, tx);
+      } catch (error) {
+        // Roll the whole upgrade back rather than keep a half-converted library.
+        console.error('Library upgrade failed', error);
+        tx.abort();
+      }
     },
   });
-  
-  return db;
+  return ready;
 }
 
-export async function saveSong(song: Song) {
-  const database = await initDB();
-  await database.put('songs', song);
+/** v1 kept the audio blob inside each song and a single set list. */
+async function migrate(database: IDBPDatabase<Schema>, oldVersion: number, tx: unknown) {
+  if (oldVersion < 1) database.createObjectStore('songs', { keyPath: 'id' });
+  database.createObjectStore('pads', { keyPath: 'id' });
+  database.createObjectStore('sets', { keyPath: 'id' });
+  database.createObjectStore('audio');
+  if (oldVersion < 1) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the v1 stores are outside the v2 schema
+  const legacy = tx as any;
+  const songs = legacy.objectStore('songs');
+  if (songs.indexNames.contains('by-date')) songs.deleteIndex('by-date');
+  for (const old of (await songs.getAll()) as LegacySong[]) {
+    await legacy.objectStore('audio').put(old.audioBlob, old.id);
+    await songs.put(fromLegacy(old));
+  }
+  if (database.objectStoreNames.contains('setlist' as never)) {
+    const rows = ((await legacy.objectStore('setlist').getAll()) as Array<{ songId: string; order: number }>).sort(
+      (a, b) => a.order - b.order,
+    );
+    if (rows.length) {
+      await legacy.objectStore('sets').put({ id: uid(), name: 'Set list', songIds: rows.map(row => row.songId), updatedAt: Date.now() });
+    }
+    database.deleteObjectStore('setlist' as never);
+  }
 }
 
-export async function getSong(id: string): Promise<Song | undefined> {
-  const database = await initDB();
-  return database.get('songs', id);
+export async function loadAll(): Promise<{ songs: Song[]; pads: Pad[]; sets: WorshipSet[] }> {
+  const database = await db();
+  const [songs, pads, sets] = await Promise.all([
+    database.getAll('songs'),
+    database.getAll('pads'),
+    database.getAll('sets'),
+  ]);
+  return {
+    songs: songs.sort((a, b) => b.addedAt - a.addedAt),
+    pads: pads.sort((a, b) => a.tonic - b.tonic),
+    sets: sets.sort((a, b) => b.updatedAt - a.updatedAt),
+  };
 }
 
-export async function getAllSongs(): Promise<Song[]> {
-  const database = await initDB();
-  return database.getAllFromIndex('songs', 'by-date');
-}
+export const putSong = async (song: Song) => void (await db()).put('songs', song);
+export const putPad = async (pad: Pad) => void (await db()).put('pads', pad);
+export const putSet = async (set: WorshipSet) => void (await db()).put('sets', set);
+export const putAudio = async (id: string, blob: Blob) => void (await db()).put('audio', blob, id);
+export const getAudio = async (id: string) => (await db()).get('audio', id);
 
-export async function deleteSong(id: string) {
-  const database = await initDB();
+export async function removeSong(id: string, sets: WorshipSet[]) {
+  const database = await db();
   await database.delete('songs', id);
+  await database.delete('audio', id);
+  for (const set of sets.filter(item => item.songIds.includes(id))) {
+    await database.put('sets', { ...set, songIds: set.songIds.filter(songId => songId !== id) });
+  }
 }
 
-export async function saveSetlistItem(item: SetlistItem) {
-  const database = await initDB();
-  await database.put('setlist', item);
+export async function removePad(id: string) {
+  const database = await db();
+  await database.delete('pads', id);
+  await database.delete('audio', id);
 }
 
-export async function getSetlist(): Promise<SetlistItem[]> {
-  const database = await initDB();
-  return database.getAllFromIndex('setlist', 'by-order');
+export const removeSet = async (id: string) => void (await db()).delete('sets', id);
+
+interface LegacyPart {
+  name: string;
+  startBar: number;
+  endBar: number;
+  pickupBeats: number;
+  fadeInBeats: number;
+  fadeOutBeats: number;
+}
+interface LegacySong {
+  id: string;
+  name: string;
+  audioBlob: Blob;
+  duration: number;
+  timeSignature?: string;
+  dateAdded: number;
+  sourceUrl?: string;
+  phase?:
+    | { kind: 'needs-tap' }
+    | { kind: 'tapped'; downbeats: number[]; marks: Array<{ bar: number; name: string }> }
+    | { kind: 'ready'; downbeats: number[]; parts: LegacyPart[] };
 }
 
-export async function deleteSetlistItem(id: string) {
-  const database = await initDB();
-  await database.delete('setlist', id);
-}
-
-export async function clearSetlist() {
-  const database = await initDB();
-  await database.clear('setlist');
+function fromLegacy(old: LegacySong): Song {
+  const perBar = Number.parseInt(old.timeSignature ?? '4', 10) || 4;
+  const phase = old.phase ?? { kind: 'needs-tap' as const };
+  const downbeats = phase.kind === 'needs-tap' ? [] : phase.downbeats;
+  const taps: Tap[] = downbeats.flatMap((t, i) => {
+    const next = downbeats[i + 1] ?? (i > 0 ? t + t - downbeats[i - 1] : t + 2);
+    return Array.from({ length: perBar }, (_, k) => ({ t: t + ((next - t) * k) / perBar, one: k === 0 }));
+  });
+  const marks =
+    phase.kind === 'ready'
+      ? phase.parts.map(part => ({ bar: part.startBar, name: part.name, part }))
+      : phase.kind === 'tapped'
+        ? phase.marks.map(mark => ({ bar: mark.bar, name: mark.name, part: undefined }))
+        : [];
+  const sections: Section[] = marks.map(({ bar, name, part }) => ({
+    id: uid(),
+    type: typeFromName(name),
+    ...(typeFromName(name) === 'custom' ? { name } : {}),
+    at: downbeats[bar - 1] ?? 0,
+    ...DEFAULT_SECTION,
+    ...(part ? { pickupBeats: part.pickupBeats, fadeInBeats: part.fadeInBeats, fadeOutBeats: part.fadeOutBeats } : {}),
+  }));
+  const lastEnd = phase.kind === 'ready' ? phase.parts[phase.parts.length - 1]?.endBar : undefined;
+  return {
+    id: old.id,
+    title: old.name,
+    artist: '',
+    duration: old.duration,
+    ...(old.sourceUrl ? { source: old.sourceUrl } : {}),
+    peaks: [],
+    chroma: [],
+    beatsPerBar: perBar,
+    taps,
+    fill: false,
+    sections,
+    // In v1 a last part ending on the final downbeat ran to the end of the song.
+    marksEnd: lastEnd && lastEnd < downbeats.length ? downbeats[lastEnd - 1] : old.duration,
+    refined: phase.kind === 'ready',
+    updatedAt: Date.now(),
+    addedAt: old.dateAdded,
+  };
 }
