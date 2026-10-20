@@ -32,6 +32,8 @@ export interface Section {
   pickupBeats: number;
   fadeInBeats: number;
   fadeOutBeats: number;
+  /** Beats after the loop point where the fade-out ends, so the old pass rings over the new one. Negative ends it early. Missing means 0. */
+  fadeOutEndBeats?: number;
   repeats: number;
   jumpAt: JumpAt;
 }

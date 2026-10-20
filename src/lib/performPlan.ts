@@ -22,6 +22,12 @@ export function fadeOutStart(view: SectionView, grid: Grid, boundary: number): n
   return beatTime(grid, beatPos(grid, boundary) - view.section.fadeOutBeats);
 }
 
+/** Audio times of the fade-out when another pass takes over at `boundary`: it can end before or after the boundary. */
+export function fadeOutSpan(view: SectionView, grid: Grid, boundary: number): { start: number; end: number } {
+  const end = beatPos(grid, boundary) + (view.section.fadeOutEndBeats ?? 0);
+  return { start: beatTime(grid, end - view.section.fadeOutBeats), end: beatTime(grid, end) };
+}
+
 /**
  * First boundary of the rule at or after `earliest`, inside the pass that lands at the section start.
  * Falls back to the end of the pass, since a pick must land somewhere.

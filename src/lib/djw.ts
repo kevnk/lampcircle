@@ -47,6 +47,7 @@ export function serializeDjw(song: Song, options: { includeAudioPath: boolean })
       pickup_beats: view.section.pickupBeats,
       fade_in: view.section.fadeInBeats,
       fade_out: view.section.fadeOutBeats,
+      ...(view.section.fadeOutEndBeats ? { fade_out_end: view.section.fadeOutEndBeats } : {}),
       repeats: view.section.repeats,
       jump_at: view.section.jumpAt,
     })),
@@ -80,6 +81,7 @@ export function parseDjw(text: string): DjwMap {
       pickupBeats: num(row.pickup_beats, `${name} pickup_beats`),
       fadeInBeats: num(row.fade_in, `${name} fade_in`),
       fadeOutBeats: num(row.fade_out, `${name} fade_out`),
+      ...(row.fade_out_end === undefined ? {} : { fadeOutEndBeats: num(row.fade_out_end, `${name} fade_out_end`) }),
       repeats: typeof row.repeats === 'number' ? row.repeats : 1,
       jumpAt,
     };

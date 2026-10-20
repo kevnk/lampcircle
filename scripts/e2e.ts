@@ -339,6 +339,20 @@ async function main() {
     const stepped = (name: string) => `document.querySelector('[role=group][aria-label="${name}"] output').textContent`;
     const dot = (label: string) => `document.querySelector('[role=slider][aria-label="${label}"]')`;
     await waitFor(`${stepped('fade out')} === '2 beats' && ${dot('Fade-out start')}.getAttribute('aria-valuenow') === '-2'`, 'the fade-out moves its dot on the seam');
+    const fadeOutEnd = (more: boolean) => clickAt(`document.querySelector('[aria-label="${more ? 'More' : 'Less'} fade-out end"]')`);
+    await fadeOutEnd(true);
+    await fadeOutEnd(true);
+    await waitFor(
+      `${stepped('fade-out end')} === '1 beat late' && ${dot('Fade-out end')}.getAttribute('aria-valuenow') === '1' && ${dot('Fade-out start')}.getAttribute('aria-valuenow') === '-1'`,
+      'the fade-out can end after the loop point',
+    );
+    await ev(`${dot('Fade-out end')}.focus()`);
+    await press('ArrowLeft');
+    await waitFor(`${stepped('fade-out end')} === '½ beats late' && ${stepped('fade out')} === '1½ beats'`, 'moving the fade-out end keeps its start');
+    await press('ArrowRight');
+    await fadeOutEnd(false);
+    await fadeOutEnd(false);
+    await waitFor(`${stepped('fade-out end')} === 'on the 1' && ${stepped('fade out')} === '2 beats'`, 'the fade-out end steps back to the loop point');
     // Drag the fade-in start 2 beats earlier. The fade-in end stays put.
     const grip = await ev<{ x: number; y: number; perBeat: number }>(
       `(() => { const el = ${dot('Fade-in start')}; el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); const box = el.parentElement.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, perBeat: box.width / (el.getAttribute('aria-valuemax') - el.getAttribute('aria-valuemin')) }; })()`,
@@ -366,11 +380,17 @@ async function main() {
     await sleep(400);
     check('the playhead moves across the pass', (await ev<number>(passPlayhead)) > early, early);
     await click('Stop');
-    // The transition plays into the loop point and a bar past it, then stops by itself.
+    // The transition plays into the loop point and a bar past it, then stops by itself. A late fade-out end rings over the loop point.
+    await fadeOutEnd(true);
+    await fadeOutEnd(true);
     await click('Play transition');
     await waitFor(`/pass 1 · bar/.test(document.body.innerText) && document.querySelector('[data-playhead=seam]')`, 'the transition plays with a playhead on the seam');
     await waitFor(`/pass 2 · bar 9/.test(document.body.innerText)`, 'the transition crosses the loop point', 10000);
+    const ring = await ev<number>(`(() => { const s = __djw.session.segments[0]; return s.prevEndCtx - s.landingCtx; })()`);
+    check('the old pass rings a beat past the loop point', Math.abs(ring - 0.5) < 0.01, ring);
     await waitFor(`!document.querySelector('[data-playhead]') && ${find('Play transition')}`, 'the transition stops by itself', 10000);
+    await fadeOutEnd(false);
+    await fadeOutEnd(false);
     await click('Repeat');
     await click('Play transition');
     await waitFor(`/pass 2 · bar/.test(document.body.innerText)`, 'the repeating transition crosses the loop point', 10000);

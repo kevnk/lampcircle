@@ -347,8 +347,8 @@ export function checks(song: Song): Check[] {
     const before = beatPos(grid, view.start);
     const length = beatPos(grid, view.end) - before;
     // A fade-in that reaches before 0:00 is cut short, but singers coming in before the song starts cannot be heard.
-    const { pickupBeats, fadeOutBeats, repeats } = view.section;
-    return beatTime(grid, before - pickupBeats) < -0.05 || fadeOutBeats > length || repeats < 1;
+    const { pickupBeats, fadeOutBeats, fadeOutEndBeats = 0, repeats } = view.section;
+    return beatTime(grid, before - pickupBeats) < -0.05 || fadeOutBeats - fadeOutEndBeats > length || repeats < 1;
   });
   return [
     {

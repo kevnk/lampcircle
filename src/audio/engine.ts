@@ -1,7 +1,7 @@
 import type { Pad, Song } from '../types';
 import { getAudio } from '../lib/db';
 import { barBeatAt, barSeconds, beatPos, beatTime, sectionViews, songGrid, upper, type Grid, type SectionView } from '../lib/songMap';
-import { clockBoundary, decideNext, fadeCurve, fadeOutStart, leadIn, nextBoundary, seamEnd, type Reason } from '../lib/performPlan';
+import { clockBoundary, decideNext, fadeCurve, fadeOutSpan, fadeOutStart, leadIn, nextBoundary, seamEnd, type Reason } from '../lib/performPlan';
 
 const COMMIT_AHEAD = 3;
 const MIN_RAMP = 0.005;
@@ -278,6 +278,8 @@ interface Segment {
   startCtx: number;
   /** When the previous segment starts fading for this one. Before then, this segment can be revoked. */
   prevFadeCtx: number;
+  /** When the previous segment has faded out. It can ring past this one's landing. */
+  prevEndCtx: number;
   /** The previous segment's gain before this one faded it out. Revoking puts it back. */
   prevPoints: Points;
   voice: Voice;
@@ -351,6 +353,8 @@ export class PerformSession {
   padSource: PadSource;
   pads: PadVoice[] = [];
   private fading: PadVoice[] = [];
+  /** Passes that have handed over but still ring out their fade-out. */
+  private tails: Array<{ voice: Voice; end: number }> = [];
   private padTicket = 0;
   clock: PadClock | null = null;
   private timer: number;
@@ -363,6 +367,7 @@ export class PerformSession {
   dispose() {
     window.clearInterval(this.timer);
     for (const segment of this.segments) stop(segment.voice);
+    for (const tail of this.tails) stop(tail.voice);
     this.padTicket++;
     [...this.pads, ...this.fading].forEach(releasePad);
     this.segments = [];
@@ -373,6 +378,8 @@ export class PerformSession {
 
   startSong(ps: PerfSong, options: { from: number; landingCtx?: number; passes?: number; until?: number }) {
     for (const segment of this.segments) stop(segment.voice);
+    for (const tail of this.tails) stop(tail.voice);
+    this.tails = [];
     void audio().ctx.resume();
     this.ps = ps;
     this.segments = [];
@@ -560,12 +567,14 @@ export class PerformSession {
     const voice = play(ps.buffer, audio().song, startCtx, offset);
     fadeTo(voice, 1, startCtx, landing - (view.start - singerStart));
     let prevFadeCtx = Infinity;
+    let prevEndCtx = landing;
     let prevPoints: Points = [];
     if (prev) {
-      const fadeAudio = fadeOutStart(ps.views[prev.idx], ps.grid, boundaryAudio);
-      prevFadeCtx = Math.max(t + 0.01, landing - (boundaryAudio - fadeAudio));
+      const fade = fadeOutSpan(ps.views[prev.idx], ps.grid, boundaryAudio);
+      prevFadeCtx = Math.max(t + 0.01, landing - (boundaryAudio - fade.start));
+      prevEndCtx = landing + (fade.end - boundaryAudio);
       prevPoints = prev.voice.points;
-      fadeTo(prev.voice, 0, prevFadeCtx, landing);
+      fadeTo(prev.voice, 0, prevFadeCtx, prevEndCtx);
     }
     this.segments.push({
       idx,
@@ -576,6 +585,7 @@ export class PerformSession {
       seamAudio: seamEnd(view, ps.grid, ps.buffer.duration),
       startCtx,
       prevFadeCtx,
+      prevEndCtx,
       prevPoints,
       voice,
     });
@@ -618,7 +628,9 @@ export class PerformSession {
     if (!ps || this.segments.length === 0) return;
     while (this.segments.length > 1 && t >= this.segments[1].landingCtx) {
       const old = this.segments.shift()!;
-      stop(old.voice, t + 0.1);
+      const end = Math.max(t, this.segments[0].prevEndCtx) + 0.1;
+      stop(old.voice, end);
+      this.tails = [...this.tails.filter(tail => tail.end > t), { voice: old.voice, end }];
     }
     for (let guard = 0; guard < 8; guard++) {
       const tail = this.segments[this.segments.length - 1];

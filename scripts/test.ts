@@ -178,6 +178,10 @@ const g = map.buildGrid([0, 0.5, 1, 1.5, 2, 2.6, 3.2, 3.8, 4.4].map((t, i) => ({
 const view = { section: { pickupBeats: 2, fadeInBeats: 1 }, start: 4.4, s: 2, e: 3 } as never;
 const lead = plan.leadIn(view, g);
 same('pickup walks back along tapped beats', [r3(lead.singerStart), r3(lead.audioStart)], [3.2, 2.6]);
+const fadeSpan = (fadeOutEndBeats?: number) => Object.values(plan.fadeOutSpan({ section: { fadeOutBeats: 1, fadeOutEndBeats } } as never, g, 2)).map(r3);
+same('the fade-out ends on the boundary by default', fadeSpan(), [1.5, 2]);
+same('a late fade-out end rings over the boundary', fadeSpan(1), [2, 2.6]);
+same('an early fade-out end stops before the boundary', fadeSpan(-1), [1, 1.5]);
 const chorus = map.sectionViews(s)[2];
 const sg = map.songGrid(s);
 same('next beat boundary', r3(plan.nextBoundary('beat', 17.3, chorus, sg, chorus.end)), 17.5);

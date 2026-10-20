@@ -5,7 +5,7 @@ import { go, useStore } from '../store';
 import { Button, Card, SongHeader, StepPills, Stepper, beatsLabel, useFrame } from '../ui';
 import { PerformSession, audio, loadBuffer, now, padSourceFor, perfSong, transport } from '../audio/engine';
 import { SECTION_TYPES, beatPos, beatTime, bpmOf, keysText, sectionViews, songGrid, songKeys, type Grid, type SectionView } from '../lib/songMap';
-import { fadeOutStart, leadIn, seamEnd } from '../lib/performPlan';
+import { fadeOutSpan, leadIn, seamEnd } from '../lib/performPlan';
 import { doneSteps, stepNav } from './SongTap';
 
 const JUMPS: Array<[JumpAt, string]> = [
@@ -48,7 +48,7 @@ export function Refine({ song }: { song: Song }) {
   const siblings = views.filter(item => item.section.type === view.section.type && item !== view);
   const typeLabel = SECTION_TYPES.find(item => item.type === view.section.type)?.label.toLowerCase();
   const plural = typeLabel ? (typeLabel.endsWith('s') ? `${typeLabel}es` : `${typeLabel}s`) : null;
-  const { pickupBeats, fadeInBeats, fadeOutBeats, repeats, jumpAt } = view.section;
+  const { pickupBeats, fadeInBeats, fadeOutBeats, fadeOutEndBeats = 0, repeats, jumpAt } = view.section;
 
   return (
     <div>
@@ -110,7 +110,7 @@ export function Refine({ song }: { song: Song }) {
 
         <div className="mt-6 flex flex-wrap items-center gap-3">
           {siblings.length > 0 && plural && (
-            <Button onClick={() => update({ pickupBeats, fadeInBeats, fadeOutBeats, repeats, jumpAt }, siblings.map(item => item.section.id))}>
+            <Button onClick={() => update({ pickupBeats, fadeInBeats, fadeOutBeats, fadeOutEndBeats, repeats, jumpAt }, siblings.map(item => item.section.id))}>
               Copy settings to all {plural}
             </Button>
           )}
@@ -136,13 +136,17 @@ type Mode = 'transition' | 'loop';
 function Seam({ song, view, onChange }: { song: Song; view: SectionView; onChange: (patch: Partial<Section>) => void }) {
   const grid = songGrid(song);
   const buffer = useBuffer(song.id);
-  const { pickupBeats: pickup, fadeInBeats: fadeIn, fadeOutBeats: fadeOut } = view.section;
+  const { pickupBeats: pickup, fadeInBeats: fadeIn, fadeOutBeats: fadeOut, fadeOutEndBeats: fadeOutEnd = 0 } = view.section;
   const bar = song.beatsPerBar;
   // The view holds its zoom while a handle is dragged, so the handle stays under the pointer.
-  const [held, setHeld] = useState<number | null>(null);
-  const before = held ?? (Math.ceil(Math.max(pickup + fadeIn, fadeOut, 1) / bar) + 1) * bar;
+  const [held, setHeld] = useState<{ before: number; after: number } | null>(null);
+  const { before, after } = held ?? {
+    before: (Math.ceil(Math.max(pickup + fadeIn, fadeOut - fadeOutEnd, 1) / bar) + 1) * bar,
+    after: Math.ceil((Math.max(0, fadeOutEnd) + 1) / bar) * bar,
+  };
   const seam = seamEnd(view, grid, song.duration);
-  const listen = useListen(song, view, before, bar);
+  const listen = useListen(song, view, before, after);
+  const fadeOutStart = fadeOutEnd - fadeOut;
   const { heard, snap, mode, repeat } = listen;
   // Beats from the loop point: the end of the pass counts up to it, and the next pass counts on from it.
   const rel = heard === null ? null : beatPos(grid, heard) - beatPos(grid, heard > (view.start + seam) / 2 ? seam : view.start);
@@ -150,13 +154,28 @@ function Seam({ song, view, onChange }: { song: Song; view: SectionView; onChang
   return (
     <div className="mt-8">
       <p className="mb-2 font-medium">Loop seam</p>
-      <SeamView grid={grid} buffer={buffer} view={view} seam={seam} before={before} after={bar} bar={bar} rel={rel} onHold={setHeld} onChange={onChange} />
+      <SeamView grid={grid} buffer={buffer} view={view} seam={seam} before={before} after={after} bar={bar} rel={rel} onHold={setHeld} onChange={onChange} />
 
       <div className="mt-4 flex flex-wrap gap-x-8 gap-y-5">
         <div>
           <p className="mb-1.5 text-sm font-medium">Fade out</p>
           <Stepper name="fade out" value={fadeOut} min={0} max={MAX_BEATS} step={0.5} label={beatsLabel(fadeOut)} onChange={value => onChange({ fadeOutBeats: value })} />
-          <p className="mt-1.5 text-sm text-muted">Ends at the loop point</p>
+          <p className="mt-1.5 text-sm text-muted">
+            Starts {fadeOutStart ? `${beatsLabel(Math.abs(fadeOutStart))} ${fadeOutStart < 0 ? 'before' : 'after'}` : 'at'} the loop point
+          </p>
+        </div>
+        <div>
+          <p className="mb-1.5 text-sm font-medium">Fade out ends</p>
+          <Stepper
+            name="fade-out end"
+            value={fadeOutEnd}
+            min={-MAX_BEATS}
+            max={MAX_BEATS}
+            step={0.5}
+            label={fadeOutEnd ? `${beatsLabel(Math.abs(fadeOutEnd))} ${fadeOutEnd > 0 ? 'late' : 'early'}` : 'on the 1'}
+            onChange={value => onChange({ fadeOutEndBeats: value })}
+          />
+          <p className="mt-1.5 text-sm text-muted">Later lets the end ring over the loop point</p>
         </div>
         <div>
           <p className="mb-1.5 text-sm font-medium">Fade in</p>
@@ -220,10 +239,10 @@ function SeamView({
   after: number;
   bar: number;
   rel: number | null;
-  onHold: (before: number | null) => void;
+  onHold: (window: { before: number; after: number } | null) => void;
   onChange: (patch: Partial<Section>) => void;
 }) {
-  const { pickupBeats: pickup, fadeInBeats: fadeIn, fadeOutBeats: fadeOut } = view.section;
+  const { pickupBeats: pickup, fadeInBeats: fadeIn, fadeOutBeats: fadeOut, fadeOutEndBeats: fadeOutEnd = 0 } = view.section;
   const box = useRef<HTMLDivElement>(null);
   const span = before + after;
   const x = (beat: number) => ((beat + before) / span) * 1000;
@@ -238,7 +257,7 @@ function SeamView({
   const beatOf = (i: number) => -before + ((i + 0.5) / COLUMNS) * span;
   // The engine's equal-power fades: a quarter sine from silent to full.
   const rise = (share: number) => Math.sin((share * Math.PI) / 2);
-  const gainOut = (beat: number) => (beat >= 0 ? 0 : beat <= -fadeOut ? 1 : rise(-beat / fadeOut));
+  const gainOut = (beat: number) => (beat >= fadeOutEnd ? 0 : beat <= fadeOutEnd - fadeOut ? 1 : rise((fadeOutEnd - beat) / fadeOut));
   const gainIn = (beat: number) => (beat >= -pickup ? 1 : beat <= -pickup - fadeIn ? 0 : rise((beat + pickup + fadeIn) / fadeIn));
   // A lane's gain line runs from full at its top + 10 to silent at its top + 90.
   const gainLine = (gain: (beat: number) => number, top: number, corners: number[]) =>
@@ -250,17 +269,30 @@ function SeamView({
   for (let beat = -before; beat <= after; beat++) ticks.push(beat);
   const barName = (beat: number) => (beat < 0 ? view.e + beat / bar + 1 : view.s + 1 + beat / bar);
 
+  const fromLoop = (beat: number) => (beat ? `${beatsLabel(Math.abs(beat))} ${beat < 0 ? 'before' : 'after'} the loop point` : 'at the loop point');
   const save = (patch: Partial<Section>) => {
     if (Object.entries(patch).some(([key, value]) => view.section[key as keyof Section] !== value)) onChange(patch);
   };
   const handles = [
     {
       label: 'Fade-out start',
-      beat: -fadeOut,
+      beat: fadeOutEnd - fadeOut,
       top: '5%',
       color: '#1C1C1A',
-      text: fadeOut ? `${beatsLabel(fadeOut)} before the loop point` : 'at the loop point',
-      move: (beat: number) => save({ fadeOutBeats: clampBeats(-beat) }),
+      text: fromLoop(fadeOutEnd - fadeOut),
+      move: (beat: number) => save({ fadeOutBeats: clampBeats(fadeOutEnd - beat) }),
+    },
+    {
+      label: 'Fade-out end',
+      beat: fadeOutEnd,
+      top: '45%',
+      color: '#1C1C1A',
+      text: fromLoop(fadeOutEnd),
+      // The start stays put while the end moves.
+      move: (beat: number) => {
+        const next = Math.min(MAX_BEATS, Math.max(-MAX_BEATS, beat));
+        save({ fadeOutEndBeats: next, fadeOutBeats: clampBeats(next - fadeOutEnd + fadeOut) });
+      },
     },
     {
       label: 'Fade-in start',
@@ -301,7 +333,7 @@ function SeamView({
         >
           <rect width={1000} height={100} fill="#F4F4F1" />
           <rect width={1000} y={100} height={100} fill="#FFFFFF" />
-          <rect x={x(-fadeOut)} width={x(0) - x(-fadeOut)} height={100} fill="#E4E4DF" />
+          <rect x={x(fadeOutEnd - fadeOut)} width={x(fadeOutEnd) - x(fadeOutEnd - fadeOut)} height={100} fill="#E4E4DF" />
           <rect x={x(-pickup - fadeIn)} y={100} width={x(-pickup) - x(-pickup - fadeIn)} height={100} fill="#FBE3D6" />
           {ticks.map(beat => (
             <line
@@ -324,7 +356,7 @@ function SeamView({
             </>
           )}
           <line x1={0} x2={1000} y1={100} y2={100} stroke="#D4D4CE" vectorEffect="non-scaling-stroke" />
-          <polyline points={gainLine(gainOut, 0, [-fadeOut, 0])} fill="none" stroke="#1C1C1A" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+          <polyline points={gainLine(gainOut, 0, [fadeOutEnd - fadeOut, fadeOutEnd])} fill="none" stroke="#1C1C1A" strokeWidth={2} vectorEffect="non-scaling-stroke" />
           <polyline points={gainLine(gainIn, 100, [-pickup - fadeIn, -pickup])} fill="none" stroke="#C2410C" strokeWidth={2} vectorEffect="non-scaling-stroke" />
         </svg>
         <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-white/85 px-1 font-mono text-xs text-muted">end of pass · bar {view.e}</span>
@@ -348,7 +380,7 @@ function SeamView({
             style={{ left: `${x(handle.beat) / 10}%`, top: handle.top }}
             onPointerDown={event => {
               event.currentTarget.setPointerCapture(event.pointerId);
-              onHold(before);
+              onHold({ before, after });
             }}
             onPointerMove={event => {
               if (event.currentTarget.hasPointerCapture(event.pointerId)) handle.move(beatAt(event));
@@ -382,6 +414,7 @@ function SeamView({
 /** One whole pass, from the start of its fade-in to the loop point, with the playhead while it plays. */
 function PassWave({ grid, buffer, view, seam, heard }: { grid: Grid; buffer: AudioBuffer | null | undefined; view: SectionView; seam: number; heard: number | null }) {
   const { audioStart: start, singerStart } = leadIn(view, grid);
+  const fade = fadeOutSpan(view, grid, seam);
   const length = Math.max(0.01, seam - start);
   const x = (t: number) => ((t - start) / length) * 100;
   const bars = useMemo(() => {
@@ -397,7 +430,7 @@ function PassWave({ grid, buffer, view, seam, heard }: { grid: Grid; buffer: Aud
   return (
     <div className="relative h-20 select-none overflow-hidden rounded-md border border-line bg-wave-bg" aria-hidden>
       <div className="absolute inset-y-0 bg-accent-soft" style={{ left: 0, width: `${x(singerStart)}%` }} />
-      <div className="absolute inset-y-0 right-0 bg-[#E4E4DF]" style={{ left: `${x(fadeOutStart(view, grid, seam))}%` }} />
+      <div className="absolute inset-y-0 bg-[#E4E4DF]" style={{ left: `${x(fade.start)}%`, width: `${Math.max(0, x(Math.min(fade.end, seam)) - x(fade.start))}%` }} />
       {downbeats.map(item => (
         <div key={item.bar} className="absolute inset-y-0 border-l border-line" style={{ left: `${x(item.t)}%` }}>
           {(item.bar - view.s - 1) % every === 0 && <span className="absolute left-1 top-0.5 font-mono text-[10px] text-muted">{item.bar}</span>}
