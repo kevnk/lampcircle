@@ -6,7 +6,7 @@ import { Button, Card, SongHeader, StepPills, Stepper, beatsLabel, useFrame } fr
 import { PerformSession, audio, loadBuffer, now, padSourceFor, perfSong, transport } from '../audio/engine';
 import { SECTION_TYPES, beatPos, beatTime, bpmOf, keysText, sectionViews, songGrid, songKeys, type Grid, type SectionView } from '../lib/songMap';
 import { fadeOutSpan, leadIn, seamEnd } from '../lib/performPlan';
-import { doneSteps, stepNav } from './SongTap';
+import { doneSteps, focusedSection, stepNav } from './SongTap';
 
 const JUMPS: Array<[JumpAt, string]> = [
   ['beat', 'Next beat'],
@@ -21,8 +21,12 @@ const clampBeats = (beats: number) => Math.min(MAX_BEATS, Math.max(0, beats));
 export function Refine({ song }: { song: Song }) {
   const store = useStore();
   const views = sectionViews(song);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState(() => focusedSection.get(song.id) ?? null);
   const view = views.find(item => item.section.id === selectedId) ?? views[0];
+  const select = (id: string) => {
+    focusedSection.set(song.id, id);
+    setSelectedId(id);
+  };
   const bpm = bpmOf(songGrid(song));
   const meta = [song.artist || 'Unknown artist', bpm ? `${Math.round(bpm)} BPM` : null, keysText(songKeys(song))].filter(Boolean).join(' · ');
 
@@ -68,7 +72,7 @@ export function Refine({ song }: { song: Song }) {
                 role="option"
                 aria-selected={selected}
                 className={`min-w-[7.5rem] flex-1 rounded-md border px-3 py-2 text-left ${selected ? 'border-2 border-accent bg-accent-soft' : sibling ? 'border-line bg-[#E4E4DF]' : 'border-line bg-white hover:bg-paper'}`}
-                onClick={() => setSelectedId(item.section.id)}
+                onClick={() => select(item.section.id)}
               >
                 <span className="block font-medium">{item.name}</span>
                 <span className="block font-mono text-xs text-muted">
@@ -187,7 +191,7 @@ function Seam({ song, view, onChange }: { song: Song; view: SectionView; onChang
         </div>
         <div>
           <p className="mb-1.5 text-sm font-medium">Fade in ends</p>
-          <Stepper name="pickup" value={pickup} min={0} max={MAX_BEATS} step={0.5} label={pickup ? `${beatsLabel(pickup)} early` : 'on the 1'} onChange={value => onChange({ pickupBeats: value })} />
+          <Stepper name="fade-in end" value={pickup} min={0} max={MAX_BEATS} step={0.5} label={pickup ? `${beatsLabel(pickup)} early` : 'on the 1'} onChange={value => onChange({ pickupBeats: value })} />
           <p className="mt-1.5 text-sm text-muted">Earlier for a sung pickup</p>
         </div>
       </div>

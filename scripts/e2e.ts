@@ -218,7 +218,7 @@ async function main() {
     await clickAt(onStrip('Chorus 1'));
     await waitFor(`document.querySelector('[role=dialog][aria-label="Chorus 1 settings"]')`, 'select opens a section from the track');
     check('clicking a section does not move the playhead', (await ev<number>('__djw.engine.transport.position()')) === playhead);
-    for (let i = 0; i < 4; i++) await clickAt(inPanel('More pickup'));
+    for (let i = 0; i < 4; i++) await clickAt(inPanel('More fade-in end'));
     const pickupShare = `(() => { const bar = document.querySelector('[data-pickup="Chorus 1"]'); return bar && bar.getBoundingClientRect().width / bar.parentElement.getBoundingClientRect().width; })()`;
     await waitFor(`document.querySelector('[role=dialog]').innerText.includes('2 beats') && ${pickupShare}`, 'the pickup shows on the track');
     check('the pickup on the track is 2 beats long', Math.abs((await ev<number>(pickupShare)) - 1 / 50) < 0.002, await ev(pickupShare));
@@ -326,7 +326,7 @@ async function main() {
     await waitFor(`document.body.innerText.includes('Loop seam')`, 'refine screen');
     await clickAt(`[...document.querySelectorAll('[role=option]')].find(b => b.textContent.startsWith('Chorus 1'))`);
     await waitFor(`document.body.innerText.includes('Chorus 1 · bars 9–12')`, 'select Chorus 1');
-    for (let i = 0; i < 4; i++) await clickAt(`document.querySelector('[aria-label="More pickup"]')`);
+    for (let i = 0; i < 4; i++) await clickAt(`document.querySelector('[aria-label="More fade-in end"]')`);
     await clickAt(`document.querySelector('[aria-label="More repeats"]')`);
     await click('Next bar', 'label');
     check('pickup and repeats change', (await text()).includes('2 beats') && (await text()).includes('×2'));
@@ -361,7 +361,7 @@ async function main() {
     await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: grip.x, y: grip.y, button: 'left', clickCount: 1 });
     await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...to, button: 'left', buttons: 1 });
     await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...to, button: 'left', clickCount: 1 });
-    await waitFor(`${stepped('fade in')} === '3 beats' && ${stepped('pickup')} === '2 beats early'`, 'dragging the fade-in start lengthens the fade');
+    await waitFor(`${stepped('fade in')} === '3 beats' && ${stepped('fade-in end')} === '2 beats early'`, 'dragging the fade-in start lengthens the fade');
     await ev(`${dot('Fade-in start')}.focus()`);
     for (let i = 0; i < 4; i++) await press('ArrowRight');
     await waitFor(`${stepped('fade in')} === '1 beat'`, 'arrow keys move a dot by half a beat');

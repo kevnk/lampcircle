@@ -34,6 +34,9 @@ const TOOLS = [
   ['cut', 'Cut', Scissors, 'C', 'Click a section to split it at the nearest bar'],
 ] as const;
 
+/** The section last opened on Tap or Refine, by song id, so the other screen opens on the same one. */
+export const focusedSection = new Map<string, string>();
+
 export function stepNav(song: Song) {
   return (step: StepName) => go({ page: 'song', id: song.id, step: step === 'sections' ? 'tap' : step });
 }
@@ -86,6 +89,7 @@ export function SongTap({ song }: { song: Song }) {
 
   useEffect(() => {
     if (!selectedId) return;
+    focusedSection.set(song.id, selectedId);
     const close = (event: MouseEvent) => {
       if (!trackRef.current?.contains(event.target as Node)) setSelectedId(null);
     };
@@ -515,9 +519,19 @@ function SectionInspector({ song, view, save, loaded, onRetap, onClose }: Edit &
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
-        <span className="text-muted">Pickup</span>
-        <Stepper name="pickup" value={pickupBeats} min={0} max={16} step={0.5} label={beatsLabel(pickupBeats)} onChange={value => save(patched(song, view, { pickupBeats: value }))} />
-        <p className="col-span-2 -mt-1.5 text-xs text-muted">Beats it starts before bar {view.s + 1}, for a vocal lead-in.</p>
+        <div className="col-span-2">
+          <p className="mb-1.5 text-muted">Fade in ends</p>
+          <Stepper
+            name="fade-in end"
+            value={pickupBeats}
+            min={0}
+            max={16}
+            step={0.5}
+            label={pickupBeats ? `${beatsLabel(pickupBeats)} early` : 'on the 1'}
+            onChange={value => save(patched(song, view, { pickupBeats: value }))}
+          />
+          <p className="mt-1.5 text-xs text-muted">Earlier for a sung pickup. The same setting as Fade in ends in Refine.</p>
+        </div>
         <span className="text-muted">Key</span>
         <div>
           <KeySelect song={song} view={view} save={save} />
