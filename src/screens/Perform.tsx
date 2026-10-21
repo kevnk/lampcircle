@@ -4,7 +4,7 @@ import type { Song, WorshipSet } from '../types';
 import { go, useStore } from '../store';
 import { ThemeToggle, useFrame, useKeys } from '../ui';
 import { PerformSession, now, padSourceFor, perfSong, release, type PerfSong, type Snapshot } from '../audio/engine';
-import { KEY_NAMES, padFit, padGroups } from '../lib/music';
+import { KEY_NAMES, padFit, padGroups, waysIn } from '../lib/music';
 import { barSeconds, clock, keyOf, planSeconds, sectionViews, songGrid, songKeys, type SectionView } from '../lib/songMap';
 import type { JumpFade, Reason } from '../lib/performPlan';
 import { livePad, songBpm, wayIn } from './Sets';
@@ -813,7 +813,8 @@ function PadPanel(props: {
         <div className={`grid gap-3 ${tonics.length <= 2 ? 'grid-cols-2' : 'grid-cols-[repeat(auto-fill,minmax(150px,1fr))]'}`}>{tonics.map(tonic => tile(tonic, tonics.length <= 2))}</div>
       </div>
     );
-  const guided = [...new Set([...(props.picked ? way : way.slice(1)), ...groups.both])];
+  // The way in, then every pad of the modulation guide's ways into the next key. Advanced keeps the shared-chord pads.
+  const guided = [...new Set([...(props.picked ? way : way.slice(1)), ...(to ? waysIn(to).flat() : [])])];
   const elapsed = snap?.pad ? Math.max(0, now() - snap.pad.since) : 0;
   return (
     <div>

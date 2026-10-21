@@ -102,10 +102,22 @@ same('album links are playlists', [lib.isPlaylist(lib.PAD_ALBUM.url), lib.isPlay
 // Keys and theory.
 const D = music.parseKey('D')!;
 const E = music.parseKey('E')!;
-same('route D to E', names(music.route(D, E)), ['D', 'A', 'B', 'E']);
-same('route A to D', names(music.route(music.parseKey('A')!, D)), ['A', 'D']);
-same('route F# to B', names(music.route(music.parseKey('F#')!, music.parseKey('B')!)), ['F#', 'B']);
-same('route to the end', names(music.route(music.parseKey('B')!, null)), ['B']);
+const key = (name: string) => music.parseKey(name)!;
+// The routes from docs/universal_key_modulation_strategy_guide.md.
+same('route D to E rolls down the Anthem Roll', names(music.route(D, E)), ['D', 'A', 'E']);
+same('route C to D rolls down the Anthem Roll', names(music.route(key('C'), D)), ['C', 'G', 'D']);
+same('route G to D is IV to I', names(music.route(key('G'), D)), ['G', 'D']);
+same('route A to D', names(music.route(key('A'), D)), ['A', 'D']);
+same('route F# to B', names(music.route(key('F#'), key('B'))), ['F#', 'B']);
+same('route E to D rides II V I', names(music.route(E, D)), ['E', 'A', 'D']);
+same('route A to C rides up three 4ths', names(music.route(key('A'), key('C'))), ['A', 'D', 'G', 'C']);
+same('route C to E jumps to the Dominant Cascade', names(music.route(key('C'), E)), ['C', 'F#', 'B', 'E']);
+same('route G to E jumps to the V on the shared B', names(music.route(key('G'), E)), ['G', 'B', 'E']);
+same('route C# to C jumps to the Anthem Roll on the shared F', names(music.route(key('C#'), key('C'))), ['C#', 'Bb', 'F', 'C']);
+same('route Em to C jumps to the V on the shared G and B', names(music.route(key('Em'), key('C'))), ['E', 'G', 'C']);
+same('route to the end', names(music.route(key('B'), null)), ['B']);
+same('ways into D', music.waysIn(D).map(names), [['E', 'A'], ['A'], ['C', 'G']]);
+same('the Anthem Roll pad is named, not outside', music.padFit(0, key('A'), D), 'bVII in D');
 const groups = music.padGroups(D, E);
 same('pads that fit both D and E', names(groups.both), ['E', 'F#', 'A', 'B']);
 same('pads that fit only D', names(groups.from), ['D', 'G']);

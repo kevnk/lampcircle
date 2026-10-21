@@ -88,7 +88,8 @@ export function padGroups(from: MusicKey, to: MusicKey | null): PadGroups {
 /** Where a pad sits in the key you leave and the key you need, like "V in A · I in D". */
 export function padFit(pad: number, from: MusicKey, to: MusicKey | null): string {
   const a = numeral(pad, from);
-  const b = to ? numeral(pad, to) : null;
+  // The Anthem Roll's ♭VII is outside a major key but still a way into it.
+  const b = to ? (numeral(pad, to) ?? ((pad - to.tonic + 12) % 12 === 10 ? 'bVII' : null)) : null;
   const fromName = KEY_NAMES[from.tonic];
   const toName = to ? KEY_NAMES[to.tonic] : '';
   if (a && b) return `${a} in ${fromName} · ${b} in ${toName}`;
@@ -97,16 +98,29 @@ export function padFit(pad: number, from: MusicKey, to: MusicKey | null): string
   return to ? 'outside both keys' : `outside ${fromName}`;
 }
 
-/** Pads from the key you left to the next song's key, ending on a V to I cadence. */
+/**
+ * Pads from the key you left to the next song's key, moving in 4ths as in
+ * docs/universal_key_modulation_strategy_guide.md. Within 3 steps below the next key on the circle of 4ths,
+ * ride up it into a V to I. Within 2 steps above, roll down it as the Anthem Roll, ♭VII to IV to I.
+ * Farther away, jump onto one of the guide's ways in: II V I, V I, or ♭VII IV I, whichever first chord
+ * keeps the most notes of the old key's chord. Pads count as major chords, as in the guide.
+ */
 export function route(from: MusicKey, to: MusicKey | null): number[] {
   if (!to || from.tonic === to.tonic) return [to?.tonic ?? from.tonic];
-  const five = (to.tonic + 7) % 12;
-  if (from.tonic === five) return [from.tonic, to.tonic];
-  if (numeral(from.tonic, to) !== null) return [from.tonic, five, to.tonic];
-  const pivot = (to.minor ? [5, 8, 3] : [5, 2, 9])
-    .map(step => (to.tonic + step) % 12)
-    .find(pad => numeral(pad, from) !== null && numeral(pad, to) !== null);
-  return pivot === undefined ? [from.tonic, five, to.tonic] : [from.tonic, pivot, five, to.tonic];
+  const steps = (5 * (to.tonic - from.tonic + 12)) % 12;
+  if (steps <= 3) return Array.from({ length: steps + 1 }, (_, i) => (from.tonic + 5 * i) % 12);
+  if (steps >= 10) return Array.from({ length: 13 - steps }, (_, i) => (from.tonic + 7 * i) % 12);
+  const chord = (root: number, minor = false) => [root, (root + (minor ? 3 : 4)) % 12, (root + 7) % 12];
+  const held = chord(from.tonic, from.minor);
+  const shared = (pad: number) => chord(pad).filter(note => held.includes(note)).length;
+  // Ties go to the first: the guide's default II V I, then the shorter V I.
+  const way = waysIn(to).reduce((best, next) => (shared(next[0]) > shared(best[0]) ? next : best));
+  return [from.tonic, ...way, to.tonic];
+}
+
+/** The guide's ways into a key, before its I: II V, then V alone, then the Anthem Roll's ♭VII IV. */
+export function waysIn(to: MusicKey): number[][] {
+  return [[2, 7], [7], [10, 5]].map(way => way.map(step => (to.tonic + step) % 12));
 }
 
 export function tempoNote(from: number, to: number): string | null {
