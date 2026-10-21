@@ -63,6 +63,8 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   const currentRef = useRef(current);
   currentRef.current = current;
   const lastWalk = useRef(-1);
+  /** Set when you turn the pad off, so the song playing ends without one. Bringing in a pad or a song clears it. */
+  const padOff = useRef(false);
   useFrame(true);
 
   const savePrefs = (patch: Partial<Prefs>) => {
@@ -118,14 +120,14 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   const finished = current >= items.length * 2;
   const endTonic = (target: Song | undefined) => keyOf(songKeys(target!)?.end)?.tonic ?? 0;
 
-  // A song that ends moves the set to its pad, and the pad starts if "Go to pad" was never pressed.
+  // A song that ends moves the set to its pad. The pad starts unless one is in already, or you turned it off.
   useEffect(() => {
     if (!session) return;
     session.onSongEnd = () => {
       const index = currentRef.current;
       if (index % 2 !== 0) return;
       const ended = items[index / 2];
-      if (!session.snapshot().pad && ended) {
+      if (!session.snapshot().pad && ended && !padOff.current) {
         const bar = session.clock?.barLen ?? 2;
         void session.setPad(endTonic(ended), now(), bar);
       }
@@ -147,9 +149,10 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   const later = items.slice(songIndex + 1).reduce((sum, entry) => sum + planSeconds(entry), 0);
   const setLeft = (isSong && started && snap?.song ? snap.song.secondsLeft : isSong && song ? planSeconds(song) : 0) + later;
 
-  const startSong = () => {
-    if (!session || !ps || ps.views.length === 0) return;
-    session.startSong(ps, { from: 0 });
+  const startSong = (from: number) => {
+    if (!session || !ps || from >= ps.views.length) return;
+    session.startSong(ps, { from });
+    padOff.current = false;
     setStarted(true);
   };
   const crossfadeSeconds = () => {
@@ -162,13 +165,15 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
     if (!session || !target || section >= target.views.length) return;
     const landing = session.switchSong(target, section, { countIn: prefs.countIn, keepPad: prefs.keepPad, crossfade: crossfadeSeconds() });
     if (landing === null) return;
+    padOff.current = false;
     setCurrent(2 * index);
     setStarted(true);
     setViewing(null);
     setStartAt(0);
     setMoreOpen(false);
   };
-  const bringIn = () => jumpTo(songIndex + 1, Math.min(startAt, sectionViews(next!).length - 1));
+  const upNext = items[songIndex + 1];
+  const bringIn = () => upNext && jumpTo(songIndex + 1, Math.min(startAt, sectionViews(upNext).length - 1));
   /** The song one page away, or null at either end of the set. From a pad, back is the song that just ended. */
   const pageTo = (dir: 1 | -1) => {
     const to = viewing !== null ? viewing + dir : isSong ? songIndex + dir : songIndex + (dir > 0 ? 1 : 0);
@@ -177,12 +182,30 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   const show = (index: number | null) => setViewing(index !== null && isSong && index === songIndex ? null : index);
   const tapPad = (tonic: number) => {
     if (!session) return;
+    padOff.current = false;
     void session.setPad(tonic, session.padBoundary(prefs.changeOn), crossfadeSeconds());
+  };
+  const padMoves = {
+    /** Leave the song: it fades out over 2 bars as the pad comes in. */
+    go: (tonic: number) => {
+      padOff.current = false;
+      session?.leaveForPad(tonic);
+    },
+    /** The pad comes in under the song at its next phrase, and the song plays on. */
+    under: (tonic: number) => {
+      padOff.current = false;
+      session?.goToPad(tonic);
+    },
+    off: () => {
+      if (!session) return;
+      padOff.current = true;
+      session.fadePads(now(), now() + 2 * session.barLen(), true);
+    },
   };
   const fadeOutEnd = () => {
     if (!session) return;
     const bar = session.clock?.barLen ?? 2;
-    session.fadePads(now(), now() + 2 * bar);
+    session.fadePads(now(), now() + 2 * bar, true);
     setCurrent(current + 1);
   };
   const togglePause = () => {
@@ -226,12 +249,13 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
     if (finished) return;
     if (event.key === ' ') {
       event.preventDefault();
-      if (isSong && !started) startSong();
+      if (isSong && !started) startSong(0);
       else togglePause();
-    } else if (isSong && started && /^[1-9]$/.test(event.key)) {
+    } else if (isSong && /^[1-9]$/.test(event.key)) {
       event.preventDefault();
       const idx = Number(event.key) - 1;
-      if (idx < views.length) session?.pickSection(idx);
+      if (!started) startSong(idx);
+      else if (idx < views.length) session?.pickSection(idx);
     } else if (isSong && event.key.toLowerCase() === 'h') {
       session?.toggleHold();
     } else if (isSong && event.key === 'Escape') {
@@ -331,12 +355,27 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
           ) : isSong && song ? (
             <SongPads song={song} snap={snap?.song ?? null} started={started} ready={Boolean(ps)} onStart={startSong} session={session} />
           ) : left ? (
-            <PadPanel left={left} next={next} snap={snap} mode={prefs.mode} onMode={mode => savePrefs({ mode })} onPad={tapPad} way={way} have={have} />
+            <PadPanel left={left} next={next} snap={snap} mode={prefs.mode} onMode={mode => savePrefs({ mode })} onPad={tapPad} onPadOff={padMoves.off} way={way} have={have} />
           ) : null}
         </main>
         <aside className="px-5 py-6 max-lg:col-span-2 max-lg:border-t max-lg:border-stage-line">
           {finished ? null : isSong && song ? (
-            <OnDeck song={song} next={items[songIndex + 1]} session={session} snap={snap} started={started} have={have} prefs={prefs} onPrefs={savePrefs} />
+            <OnDeck
+              song={song}
+              next={upNext}
+              nextLoaded={upNext ? Boolean(loadedSongs[upNext.id]) : false}
+              startAt={startAt}
+              onStartAt={setStartAt}
+              onNext={bringIn}
+              pads={padMoves}
+              padOff={padOff.current}
+              session={session}
+              snap={snap}
+              started={started}
+              have={have}
+              prefs={prefs}
+              onPrefs={savePrefs}
+            />
           ) : left ? (
             <BringIn
               left={left}
@@ -486,7 +525,8 @@ function SectionTiles({ views, playing, queued, disabled, onPick }: { views: Sec
   );
 }
 
-function SongPads({ song, snap, started, ready, onStart, session }: { song: Song; snap: Snapshot['song']; started: boolean; ready: boolean; onStart: () => void; session: PerformSession | null }) {
+function SongPads(props: { song: Song; snap: Snapshot['song']; started: boolean; ready: boolean; onStart: (from: number) => void; session: PerformSession | null }) {
+  const { song, snap, started, ready, onStart, session } = props;
   const views = sectionViews(song);
   const current = snap ? views[snap.idx] : null;
   const next = snap?.next ?? null;
@@ -509,12 +549,15 @@ function SongPads({ song, snap, started, ready, onStart, session }: { song: Song
         )}
       </div>
       {!started && (
-        <button type="button" disabled={!ready} className="mb-5 flex items-center gap-2 rounded-md bg-stage-accent px-6 py-4 text-lg font-semibold text-stage-bg disabled:opacity-50" onClick={onStart}>
-          <Play className="h-5 w-5 fill-current" />
-          {ready ? `Start ${views[0]?.name ?? 'song'}` : 'Loading…'}
-        </button>
+        <div className="mb-5 flex flex-wrap items-center gap-4">
+          <button type="button" disabled={!ready} className="flex items-center gap-2 rounded-md bg-stage-accent px-6 py-4 text-lg font-semibold text-stage-bg disabled:opacity-50" onClick={() => onStart(0)}>
+            <Play className="h-5 w-5 fill-current" />
+            {ready ? `Start ${views[0]?.name ?? 'song'}` : 'Loading…'}
+          </button>
+          {ready && <p className="text-stage-muted">Or tap any section to start there.</p>}
+        </div>
       )}
-      <SectionTiles views={views} playing={snap?.idx} queued={next?.idx} disabled={!started} onPick={i => session?.pickSection(i)} />
+      <SectionTiles views={views} playing={snap?.idx} queued={next?.idx} disabled={!ready} onPick={i => (started ? session?.pickSection(i) : onStart(i))} />
       {snap && (
         <div className="mt-5 flex min-h-[78px] items-center justify-between gap-4 rounded-lg border border-stage-line px-4 py-3">
           <p aria-live="polite">
@@ -547,18 +590,16 @@ function SongPads({ song, snap, started, ready, onStart, session }: { song: Song
   );
 }
 
-function OnDeck({
-  song,
-  next,
-  session,
-  snap,
-  started,
-  have,
-  prefs,
-  onPrefs,
-}: {
+function OnDeck(props: {
   song: Song;
   next: Song | undefined;
+  nextLoaded: boolean;
+  startAt: number;
+  onStartAt: (index: number) => void;
+  onNext: () => void;
+  pads: { go: (tonic: number) => void; under: (tonic: number) => void; off: () => void };
+  /** You turned the pad off, so a pad still fading is on its way out. */
+  padOff: boolean;
   session: PerformSession | null;
   snap: Snapshot | null;
   started: boolean;
@@ -566,11 +607,14 @@ function OnDeck({
   prefs: Prefs;
   onPrefs: (patch: Partial<Prefs>) => void;
 }) {
+  const { song, next, pads, session, snap, started, have, prefs, onPrefs } = props;
   const pad = livePad(song, next);
   const tonic = keyOf(songKeys(song)?.end)?.tonic ?? 0;
   const [open, setOpen] = useState(false);
-  const nextBpm = next ? songBpm(next) : null;
-  const nextStart = next ? sectionViews(next)[0]?.name : null;
+  const padIn = snap?.pad ?? null;
+  const canPad = Boolean(padIn) || have.has(tonic);
+  // A pad kept under this song fades for 8 bars, and can still be turned off.
+  const tail = !padIn && snap?.padFading;
   return (
     <div>
       <p className="mb-3 font-mono text-xs uppercase tracking-wider text-stage-muted">On deck</p>
@@ -583,25 +627,37 @@ function OnDeck({
         </p>
         <button
           type="button"
-          disabled={!started || Boolean(snap?.pad) || !have.has(tonic)}
+          disabled={!started || !canPad || snap?.song?.forced}
           className="mt-3 w-full rounded-md bg-stage-text px-4 py-3.5 text-lg font-semibold text-stage-bg disabled:opacity-60"
-          onClick={() => session?.goToPad(tonic)}
+          onClick={() => pads.go(tonic)}
         >
-          {snap?.pad ? `Pad (${KEY_NAMES[snap.pad.tonic]}) is in` : `Go to pad (${pad.from})`}
+          Go to pad ({padIn ? KEY_NAMES[padIn.tonic] : pad.from})
+        </button>
+        <button
+          type="button"
+          disabled={!started || (tail ? props.padOff : !canPad)}
+          className="mt-2 w-full rounded-md border border-stage-line px-4 py-2.5 hover:bg-stage-card disabled:opacity-50"
+          onClick={() => (padIn || tail ? pads.off() : pads.under(tonic))}
+        >
+          {padIn || (tail && !props.padOff) ? 'Turn pad off' : tail ? 'Pad fading out' : 'Pad under the song'}
         </button>
         <p className="mt-3 text-sm text-stage-muted">
-          {have.has(tonic)
-            ? `The ${pad.from} pad fades in under the song at the next phrase. The song keeps going until you let it end.`
+          {canPad
+            ? 'Go to pad fades the song out over 2 bars as the pad comes in. Pad under the song brings it in at the next phrase, and the song plays on.'
             : `No pad in ${pad.from} yet. Get pads in Library, on the Pads tab.`}
         </p>
       </div>
       {next && (
-        <div className="mt-4 rounded-lg border border-stage-line p-4">
-          <p className="text-sm text-stage-muted">Then</p>
-          <p className="font-semibold">{next.title}</p>
-          <p className="mt-1 font-mono text-xs text-stage-muted">
-            {nextBpm ?? '—'} BPM · {keysOf(next)} · enters on {nextStart ?? 'Intro'}
-          </p>
+        <div className="mt-4">
+          <p className="mb-2 text-sm text-stage-muted">Then</p>
+          <NextSong
+            next={next}
+            startAt={props.startAt}
+            onStartAt={props.onStartAt}
+            loaded={props.nextLoaded}
+            waiting={snap?.song?.arriving ? snap.song.title : null}
+            onStart={props.onNext}
+          />
         </div>
       )}
       <div className="mt-4 rounded-lg border border-stage-line p-4">
@@ -626,7 +682,7 @@ function OnDeck({
       </button>
       {open && (
         <div className="mt-2 space-y-2">
-          <button type="button" disabled={!started || snap?.song?.ending} className="w-full rounded-md border border-stage-line px-4 py-2.5 text-left hover:bg-stage-card disabled:opacity-50" onClick={() => session?.endSong(2)}>
+          <button type="button" disabled={!started || snap?.song?.forced} className="w-full rounded-md border border-stage-line px-4 py-2.5 text-left hover:bg-stage-card disabled:opacity-50" onClick={() => session?.endSong(2)}>
             End song now (fade over 2 bars)
           </button>
         </div>
@@ -635,7 +691,18 @@ function OnDeck({
   );
 }
 
-function PadPanel({ left, next, snap, mode, onMode, onPad, way, have }: { left: Song; next: Song | undefined; snap: Snapshot | null; mode: PadMode; onMode: (mode: PadMode) => void; onPad: (tonic: number) => void; way: number[]; have: Set<number> }) {
+function PadPanel(props: {
+  left: Song;
+  next: Song | undefined;
+  snap: Snapshot | null;
+  mode: PadMode;
+  onMode: (mode: PadMode) => void;
+  onPad: (tonic: number) => void;
+  onPadOff: () => void;
+  way: number[];
+  have: Set<number>;
+}) {
+  const { left, next, snap, mode, onMode, onPad, way, have } = props;
   const from = keyOf(songKeys(left)?.end) ?? { tonic: 0, minor: false };
   const to = next ? keyOf(songKeys(next)?.start) : null;
   const fromName = KEY_NAMES[from.tonic];
@@ -708,11 +775,32 @@ function PadPanel({ left, next, snap, mode, onMode, onPad, way, have }: { left: 
         <p className="text-sm">{left.title} ended. The pad keeps playing until you move.</p>
       </div>
 
-      <p className="mt-6 font-mono text-xs uppercase tracking-wider text-stage-muted">Now sounding</p>
-      <p className="font-mono text-6xl font-bold">{sounding === null ? '—' : KEY_NAMES[sounding]}</p>
-      <p className="font-mono text-sm text-stage-muted">
-        {sounding !== null ? `Pad in ${KEY_NAMES[sounding]} · ${clock(elapsed)}` : have.size === 0 ? 'No pads in your library yet. Get them in Library, on the Pads tab.' : `No pad in ${fromName} yet. Pick one below.`}
-      </p>
+      <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="font-mono text-xs uppercase tracking-wider text-stage-muted">Now sounding</p>
+          <p className="font-mono text-6xl font-bold">{sounding === null ? '—' : KEY_NAMES[sounding]}</p>
+          <p className="font-mono text-sm text-stage-muted">
+            {sounding !== null
+              ? `Pad in ${KEY_NAMES[sounding]} · ${clock(elapsed)}`
+              : have.size === 0
+                ? 'No pads in your library yet. Get them in Library, on the Pads tab.'
+                : have.has(from.tonic)
+                  ? 'Pad off.'
+                  : `No pad in ${fromName} yet. Pick one below.`}
+          </p>
+        </div>
+        {sounding !== null ? (
+          <button type="button" className="rounded-md border border-stage-line px-4 py-2.5 hover:bg-stage-card" onClick={props.onPadOff}>
+            Turn pad off
+          </button>
+        ) : (
+          have.has(from.tonic) && (
+            <button type="button" className="rounded-md border border-stage-line px-4 py-2.5 hover:bg-stage-card" onClick={() => onPad(from.tonic)}>
+              Turn pad on ({fromName})
+            </button>
+          )
+        )}
+      </div>
 
       {mode === 'simple' ? (
         <div className="mt-6">
@@ -769,23 +857,15 @@ function BringIn(props: {
       </div>
     );
   }
-  const views = sectionViews(next);
-  const start = views[startAt] ?? views[0];
+  const start = sectionViews(next)[startAt];
   const startKey = start ? keyOf(start.key) : null;
   const offKey = startKey && snap?.pad && snap.pad.tonic !== startKey.tonic;
   return (
     <div>
       <p className="mb-3 font-mono text-xs uppercase tracking-wider text-stage-muted">Bring in next song</p>
-      <div className="rounded-lg border border-stage-line p-4">
-        <p className="text-lg font-semibold">{next.title}</p>
-        <p className="font-mono text-xs text-stage-muted">
-          {songBpm(next) ?? '—'} BPM · starts in {start?.key ?? '—'}
-        </p>
+      <NextSong next={next} startAt={startAt} onStartAt={props.onStartAt} loaded={props.loaded} onStart={props.onBringIn}>
         {offKey && <p className="mt-3 rounded-md bg-stage-warn px-3 py-2 text-sm">Not on {start?.key} yet. You can still start whenever you want.</p>}
-        <button type="button" disabled={!props.loaded} className="mt-3 w-full rounded-md bg-stage-text px-4 py-3.5 text-lg font-semibold text-stage-bg disabled:opacity-50" onClick={props.onBringIn}>
-          {props.loaded ? `Start ${start?.name ?? 'song'} on next bar` : 'Loading…'}
-        </button>
-      </div>
+      </NextSong>
       <button type="button" className="mt-4 flex items-center gap-1.5 px-1 py-1" aria-expanded={props.moreOpen} onClick={props.onMore}>
         More <ChevronDown className={`h-4 w-4 ${props.moreOpen ? 'rotate-180' : ''}`} />
       </button>
@@ -811,13 +891,6 @@ function BringIn(props: {
               </button>
             ))}
           </Choice>
-          <Choice title="Start at">
-            {views.slice(0, 3).map((view, i) => (
-              <button key={view.section.id} type="button" aria-pressed={startAt === i} className={option(startAt === i)} onClick={() => props.onStartAt(i)}>
-                {view.name}
-              </button>
-            ))}
-          </Choice>
           <label className="flex items-start gap-3">
             <input type="checkbox" className="mt-1 h-4 w-4" checked={prefs.countIn} onChange={event => onPrefs({ countIn: event.target.checked })} />
             <span>
@@ -832,6 +905,43 @@ function BringIn(props: {
           </label>
         </div>
       )}
+    </div>
+  );
+}
+
+/** The next song in the set, and the section to start it from. */
+function NextSong(props: {
+  next: Song;
+  startAt: number;
+  onStartAt: (index: number) => void;
+  loaded: boolean;
+  /** The song still coming in, which has to land first. */
+  waiting?: string | null;
+  onStart: () => void;
+  children?: React.ReactNode;
+}) {
+  const { next, startAt } = props;
+  const views = sectionViews(next);
+  const start = views[startAt] ?? views[0];
+  return (
+    <div className="rounded-lg border border-stage-line p-4">
+      <p className="text-lg font-semibold">{next.title}</p>
+      <p className="font-mono text-xs text-stage-muted">
+        {songBpm(next) ?? '—'} BPM · starts in {start?.key ?? '—'}
+      </p>
+      {props.children}
+      <div className="mt-3">
+        <Choice title="Start at">
+          {views.map((view, i) => (
+            <button key={view.section.id} type="button" aria-pressed={start === view} className={option(start === view)} onClick={() => props.onStartAt(i)}>
+              {view.name}
+            </button>
+          ))}
+        </Choice>
+      </div>
+      <button type="button" disabled={!props.loaded || Boolean(props.waiting)} className="mt-3 w-full rounded-md bg-stage-text px-4 py-3.5 text-lg font-semibold text-stage-bg disabled:opacity-50" onClick={props.onStart}>
+        {!props.loaded ? 'Loading…' : props.waiting ? `Wait for ${props.waiting} to come in` : `Start ${start?.name ?? 'song'} on next bar`}
+      </button>
     </div>
   );
 }

@@ -478,8 +478,20 @@ async function main() {
     // Perform.
     await waitFor(`document.body.innerText.includes('Perform this set')`, 'back on sets');
     await click('Perform this set');
-    await waitFor(`document.body.innerText.includes('Start Intro')`, 'perform is ready');
-    await click('Start Intro');
+    const tile = (name: string) => `[...document.querySelectorAll('main button')].find(b => b.textContent.includes(${JSON.stringify(name)}))`;
+    const startIntro = `[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Start Intro' && !b.disabled)`;
+    await waitFor(startIntro, 'perform is ready');
+    await clickAt(tile('Chorus 1'));
+    await waitFor(`__djw.session.snapshot().song?.idx === 2 && __djw.engine.level() > 0.005`, 'a song can start from any section', 8000);
+    check('the next song waits for this one to land', (await text()).includes('Wait for Morning Test to come in') || !(await ev<boolean>('__djw.session.snapshot().song.arriving')));
+    await waitFor(`!__djw.session.snapshot().song.arriving && ${find('Start Intro on next bar')}`, 'the next song is ready to start from this one');
+    await click('Start Intro on next bar');
+    await waitFor(`__djw.session.ps.song.title === 'Evening Test' && document.body.textContent.includes('Song 2 of 2')`, 'and starts straight from it', 8000);
+    await click('Exit');
+    await click('Tap again to stop');
+    await click('Perform this set');
+    await waitFor(startIntro, 'perform is ready again');
+    await clickAt(startIntro);
     await waitFor(`__djw.session.snapshot().song?.bar >= 1 && __djw.engine.level() > 0.005`, 'song plays and bars count');
     const before = await ev<{ bar: number; beat: number }>('__djw.session.snapshot().song');
     await sleep(700);
@@ -501,6 +513,26 @@ async function main() {
       };
       return { next: run('out', null), out: run('out', 2), in: run('in', 2), edited: run('edited', 2) };
     })()`);
+    // Without its Outro, the song's last pass, Chorus 2, rings out past its seam through the rest of the recording.
+    const ringOut = await ev<{ bar: number; midRing: number; nearEnd: number }>(`(() => {
+      const engine = __djw.engine;
+      const full = __djw.session.ps;
+      const ps = { ...full, views: full.views.slice(0, -1) };
+      const last = ps.views[ps.views.length - 1];
+      const goToPadAt = pos => {
+        const s = new engine.PerformSession(async () => null);
+        s.startSong(ps, { from: last.index, landingCtx: engine.now() - (pos - last.start) });
+        s.leaveForPad(9);
+        const endIn = s.forced ? s.endAt - engine.now() : NaN;
+        s.dispose();
+        return endIn;
+      };
+      const d = ps.grid.downbeats;
+      const bar = d[last.e + 1] - d[last.e];
+      return { bar, midRing: goToPadAt(d[last.e] + 0.3), nearEnd: goToPadAt(full.buffer.duration - 1) };
+    })()`);
+    check('Go to pad in the ring-out waits for the next bar line', Math.abs(ringOut.midRing - (3 * ringOut.bar - 0.3)) < 0.02, ringOut);
+    check('and ends when the recording does, not 2 bars later', Math.abs(ringOut.nearEnd - 1) < 0.02, ringOut);
     const near = (seam: { in: number; out: number }, into: number, out: number) => Math.abs(seam.in - into) < 0.02 && Math.abs(seam.out - out) < 0.02;
     check('going on to the next section plays straight through', seams.next.shared && near(seams.next, 0, 0), seams.next);
     check('matching the fade-out brings the picked section in over it', !seams.out.shared && near(seams.out, -0.5, -0.5), seams.out);
@@ -537,7 +569,6 @@ async function main() {
     await clickAt(`document.querySelector('[aria-label="Next song, Evening Test"]')`);
     await waitFor(`document.body.innerText.includes('Now playing: Morning Test · Chorus 2') && document.body.textContent.includes('Song 2 of 2')`, 'paging shows the next song while this one plays');
     check('paging leaves the song playing', (await ev<string>('__djw.session.snapshot().song?.title')) === 'Morning Test' && (await ev<number>('__djw.engine.level()')) > 0.005);
-    const tile = (name: string) => `[...document.querySelectorAll('main button')].find(b => b.textContent.includes(${JSON.stringify(name)}))`;
     await waitFor(`${tile('Chorus')}?.disabled === false`, 'the paged song decodes');
     await shot('6b-perform-paging');
     const morningLines = await ev<number[]>(barLines);
@@ -576,11 +607,13 @@ async function main() {
     await waitFor(`__djw.engine.audio().ctx.state === 'suspended'`, 'with Fade off, Pause stops at once', 300);
     await click('Resume');
     await waitFor(`__djw.engine.audio().ctx.state === 'running' && ${gain} > 0.99`, 'and Resume comes straight back', 300);
+    await click('Pad under the song');
+    await waitFor(`__djw.session.snapshot().pad?.tonic === 9 && __djw.session.snapshot().song`, 'pad comes in under the song', 12000);
+    await click('Turn pad off');
+    await waitFor(`!__djw.session.snapshot().pad && ${find('Pad under the song')} && __djw.session.snapshot().song && !__djw.session.snapshot().song.ending`, 'the pad turns off and the song plays on');
     await click('Go to pad (A)');
-    await waitFor(`__djw.session.snapshot().pad?.tonic === 9`, 'pad comes in under the song', 12000);
-    await click('More');
-    await click('End song now');
-    await waitFor(`document.body.innerText.includes('Morning Test ended. The pad keeps playing until you move.')`, 'song end moves to the pad', 8000);
+    await waitFor(`(() => { const s = __djw.session; return s.snapshot().song?.ending && s.pads[0]?.tonic === 9 && s.pads[0].at < s.endAt - 1; })()`, 'Go to pad brings the pad in as the song fades out', 8000);
+    await waitFor(`document.body.innerText.includes('Morning Test ended. The pad keeps playing until you move.') && __djw.session.snapshot().pad?.tonic === 9`, 'and the set moves to the pad', 8000);
     check('pad groups', (await text()).includes('Fits both') && (await text()).includes('Fits the next song, D'));
     await clickAt(`document.querySelector('[aria-label^="Pad E,"]')`);
     await waitFor(`__djw.session.snapshot().pad?.tonic === 4 && !__djw.session.snapshot().pad.next`, 'pad changes on the next bar', 8000);
@@ -588,19 +621,33 @@ async function main() {
     await waitFor(`document.body.innerText.includes('Now playing: the E pad') && document.body.textContent.includes('Song 1 of 2')`, 'paging back from a pad shows the song that ended');
     await press('Escape');
     await waitFor(`document.body.innerText.includes('Morning Test ended.') && document.body.textContent.includes('Pad after song 1')`, 'Escape goes back to what is playing');
+    await click('Turn pad off');
+    await waitFor(`!__djw.session.snapshot().pad && document.body.innerText.includes('Pad off.')`, 'the pad turns off between songs');
+    await click('Turn pad on (A)');
+    await waitFor(`__djw.session.snapshot().pad?.tonic === 9`, 'and back on', 8000);
     await shot('7-perform-pad');
     await click('Simple');
     await click('Guided');
     check('guided shows the way in', (await text()).includes('A few good ways in'));
     await click('Advanced');
-    await click('Start Intro on next bar');
+    await click('Chorus');
+    await click('Start Chorus on next bar');
     const phase = await waitFor<number>(
       `(() => { const s = __djw.session; const seg = s.segments[0]; if (!seg || !s.clock || s.ps.song.title !== 'Evening Test') return 0; return 1 + ((seg.landingCtx - s.clock.anchor) / s.clock.barLen) % 1; })()`,
       'next song is scheduled',
     );
     const offBar = Math.min(phase - 1, 2 - phase) * 1000;
     check('next song lands on a pad bar line', offBar < 5, `${offBar.toFixed(2)} ms`);
-    await waitFor(`document.body.innerText.includes('Evening Test') && __djw.session.snapshot().song?.bar >= 1`, 'next song plays', 12000);
+    await waitFor(`document.body.innerText.includes('Evening Test') && __djw.session.snapshot().song?.bar >= 1 && __djw.session.snapshot().song.idx === 1`, 'next song plays from the section picked', 12000);
+    check('Go to pad still works in the last section', (await ev<boolean>(`${find('Go to pad (D)')}.disabled`)) === false && (await ev<boolean>('__djw.session.snapshot().song.ending')));
+    // The pad kept under the new song fades over 8 bars (32 s at 60 BPM). Turning it off cuts that to 2 bars.
+    const tailLeft = `Math.max(...__djw.session.fading.map(p => p.until)) - __djw.engine.now()`;
+    await waitFor(`${find('Turn pad off')} && __djw.session.snapshot().padFading && !__djw.session.snapshot().pad`, 'the pad kept under the new song can still be turned off');
+    const longTail = await ev<number>(tailLeft);
+    await click('Turn pad off');
+    const shortTail = await ev<number>(tailLeft);
+    check('turning it off cuts its 8-bar fade to 2 bars', longTail > 12 && shortTail < 8.3, [longTail, shortTail]);
+    await waitFor(find('Pad fading out'), 'and says it is fading out');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false });
     await shot('8-perform-tablet');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1500, height: 1042, deviceScaleFactor: 1, mobile: false });

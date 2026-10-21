@@ -321,10 +321,14 @@ export interface Snapshot {
     secondsLeft: number;
     next: null | { idx: number; reason: Reason; bars: number; beats: number; landingCtx: number };
     ending: boolean;
+    /** Ending early, from End song now or Go to pad. */
+    forced: boolean;
     /** Brought in, and not landed yet. */
     arriving: boolean;
   };
   pad: null | { tonic: number; since: number; next: { tonic: number; at: number } | null };
+  /** A pad still fading out, after a new song or a new pad took over or it was turned off. */
+  padFading: boolean;
   clock: null | { bar: number; beat: number; beatsPerBar: number };
 }
 
@@ -511,19 +515,23 @@ export class PerformSession {
     this.replan();
   }
 
-  endSong(bars = 2) {
+  /** Fade the song out over `bars` from `from`, and end it there. */
+  endSong(bars = 2, from = now()) {
     const ps = this.ps;
     const current = this.segments[0];
     if (!ps || !current) return;
     this.revoke();
-    const t = now();
+    const t = Math.max(from, now());
     const end = t + bars * barSeconds(ps.grid, ps.views[current.idx].s);
     for (const segment of this.segments) {
       fadeTo(segment.voice, 0, t, end);
       stop(segment.voice, end + 0.05);
+      // A handover already under way would otherwise stop the outgoing pass at its own seam, partway through this fade.
+      segment.prevEndCtx = Math.max(segment.prevEndCtx, end);
     }
+    const last = this.segments[this.segments.length - 1];
     this.planned = 'end';
-    this.endAt = end;
+    this.endAt = Math.min(end, last.landingCtx + (ps.buffer.duration - last.landingAudio));
     this.forced = true;
   }
 
@@ -612,9 +620,25 @@ export class PerformSession {
     void this.setPad(tonic, at, 2 * barSeconds(ps.grid, view.s));
   }
 
-  fadePads(start: number, end: number) {
+  /** Leave the song for the pad: from the next bar line the pad rises over `bars` as the song fades out. A pad already in stays. */
+  leaveForPad(tonic: number, bars = 2) {
+    const ps = this.ps;
+    const current = this.segments[0];
+    if (!ps || !current) return;
+    const view = ps.views[current.idx];
+    const pos = current.landingAudio + Math.max(0, now() - current.landingCtx);
+    // In the last pass's ring-out, past the seam, bar lines run on to the end of the recording.
+    const end = pos > current.seamAudio - 0.01 ? ps.buffer.duration : current.seamAudio;
+    const boundary = nextBoundary('bar', pos + 0.05, view, ps.grid, end);
+    const at = Math.max(now(), current.landingCtx + (boundary - current.landingAudio));
+    if (this.pads.length === 0) void this.setPad(tonic, at, bars * barSeconds(ps.grid, view.s));
+    this.endSong(bars, at);
+  }
+
+  /** `all` also shortens pads already fading, such as one kept under a new song, so they are gone by `end`. */
+  fadePads(start: number, end: number, all = false) {
     this.padTicket++;
-    for (const pad of this.pads) {
+    for (const pad of all ? [...this.pads, ...this.fading.filter(item => item.until > end + 0.1)] : this.pads) {
       fadeTo(pad, 0, start, end);
       pad.until = end + 0.1;
     }
@@ -857,6 +881,7 @@ export class PerformSession {
         secondsLeft: Math.max(0, current.seamAudio - pos) + remainingPasses * (view.end - view.start) + later,
         next,
         ending: this.planned === 'end' || this.endAt !== null,
+        forced: this.forced,
         arriving: t < current.landingCtx,
       };
     }
@@ -876,6 +901,7 @@ export class PerformSession {
     return {
       paused: this.paused,
       song,
+      padFading: this.fading.some(pad => pad.until > t),
       pad:
         sounding || coming
           ? {
