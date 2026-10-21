@@ -71,11 +71,11 @@ export function Refine({ song }: { song: Song }) {
                 type="button"
                 role="option"
                 aria-selected={selected}
-                className={`min-w-[7.5rem] flex-1 rounded-md border px-3 py-2 text-left ${selected ? 'border-2 border-accent bg-accent-soft' : sibling ? 'border-line bg-[#E4E4DF]' : 'border-line bg-white hover:bg-paper'}`}
+                className={`min-w-[7.5rem] flex-1 rounded-xl border px-3 py-2 text-left transition ${selected ? 'border-accent bg-accent-soft shadow-glow-sm' : sibling ? 'border-edge bg-raised' : 'border-line bg-panel hover:bg-raised'}`}
                 onClick={() => select(item.section.id)}
               >
-                <span className="block font-medium">{item.name}</span>
-                <span className="block font-mono text-xs text-muted">
+                <span className="block font-semibold">{item.name}</span>
+                <span className="tabular block text-xs text-muted">
                   {item.e - item.s} bars · {item.key ?? '—'}
                 </span>
               </button>
@@ -85,7 +85,7 @@ export function Refine({ song }: { song: Song }) {
       </Card>
 
       <Card className="mt-6 p-5">
-        <h2 className="mb-5 text-2xl font-bold">
+        <h2 className="mb-5 text-2xl font-extrabold tracking-tight">
           {view.name} · bars {view.s + 1}–{view.e}
         </h2>
         <div className="flex flex-wrap gap-x-10 gap-y-6">
@@ -100,9 +100,9 @@ export function Refine({ song }: { song: Song }) {
               {JUMPS.map(([value, label]) => (
                 <label
                   key={value}
-                  className={`flex cursor-pointer items-center gap-3 rounded-md border px-4 py-3 ${jumpAt === value ? 'border-2 border-ink' : 'border-faint hover:bg-paper'}`}
+                  className={`flex cursor-pointer items-center gap-3 rounded-full border px-4 py-2.5 ${jumpAt === value ? 'border-accent bg-accent-soft' : 'border-edge hover:bg-raised'}`}
                 >
-                  <input type="radio" name="jump" className="h-4 w-4 accent-[#2563EB]" checked={jumpAt === value} onChange={() => update({ jumpAt: value })} />
+                  <input type="radio" name="jump" className="h-4 w-4" checked={jumpAt === value} onChange={() => update({ jumpAt: value })} />
                   {label}
                 </label>
               ))}
@@ -199,7 +199,7 @@ function Seam({ song, view, onChange }: { song: Song; view: SectionView; onChang
       <div className="mb-2 mt-8 flex flex-wrap items-baseline justify-between gap-2">
         <p className="font-medium">Listen</p>
         {snap && (
-          <p className="font-mono text-sm text-muted" aria-live="polite">
+          <p className="tabular text-sm text-muted" aria-live="polite">
             pass {snap.pass}
             {mode === 'loop' && !repeat ? ' of 2' : ''} · bar {snap.bar}
           </p>
@@ -207,14 +207,14 @@ function Seam({ song, view, onChange }: { song: Song; view: SectionView; onChang
       </div>
       <PassWave grid={grid} buffer={buffer} view={view} seam={seam} heard={heard} />
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        <Button tone="dark" onClick={() => listen.toggle('transition')}>
+        <Button tone="lantern" onClick={() => listen.toggle('transition')}>
           {mode === 'transition' ? <Square className="h-4 w-4" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
           {mode === 'transition' ? 'Stop' : 'Play transition'}
         </Button>
         <Button onClick={() => listen.toggle('loop')}>
           {mode === 'loop' ? `Stop · pass ${snap?.pass ?? 1}${repeat ? '' : ' of 2'} · bar ${snap?.bar ?? ''}` : repeat ? 'Audition loop' : 'Audition loop ×2'}
         </Button>
-        <Button tone={repeat ? 'dark' : 'quiet'} aria-pressed={repeat} onClick={listen.toggleRepeat}>
+        <Button tone={repeat ? 'lantern' : 'quiet'} aria-pressed={repeat} onClick={listen.toggleRepeat}>
           <Repeat className="h-4 w-4" aria-hidden />
           Repeat
         </Button>
@@ -283,7 +283,7 @@ function SeamView({
       label: 'Fade-out start',
       beat: fadeOutEnd - fadeOut,
       top: '5%',
-      color: '#1C1C1A',
+      tone: 'border-muted',
       text: fromLoop(fadeOutEnd - fadeOut),
       move: (beat: number) => save({ fadeOutBeats: clampBeats(fadeOutEnd - beat) }),
     },
@@ -291,7 +291,7 @@ function SeamView({
       label: 'Fade-out end',
       beat: fadeOutEnd,
       top: '45%',
-      color: '#1C1C1A',
+      tone: 'border-muted',
       text: fromLoop(fadeOutEnd),
       // The start stays put while the end moves.
       move: (beat: number) => {
@@ -303,7 +303,7 @@ function SeamView({
       label: 'Fade-in start',
       beat: -pickup - fadeIn,
       top: '95%',
-      color: '#C2410C',
+      tone: 'border-accent',
       text: `${beatsLabel(pickup + fadeIn)} before bar ${view.s + 1}`,
       move: (beat: number) => save({ fadeInBeats: clampBeats(-beat - pickup) }),
     },
@@ -311,7 +311,7 @@ function SeamView({
       label: 'Fade-in end',
       beat: -pickup,
       top: '55%',
-      color: '#C2410C',
+      tone: 'border-accent',
       text: pickup ? `${beatsLabel(pickup)} before bar ${view.s + 1}` : `on bar ${view.s + 1}`,
       // The start stays put while the end moves.
       move: (beat: number) => {
@@ -328,7 +328,7 @@ function SeamView({
 
   return (
     <div>
-      <div ref={box} className="relative h-[176px] select-none overflow-hidden rounded-md border border-line">
+      <div ref={box} className="relative h-[176px] select-none overflow-hidden rounded-xl border border-line">
         <svg
           viewBox="0 0 1000 200"
           preserveAspectRatio="none"
@@ -336,10 +336,10 @@ function SeamView({
           role="img"
           aria-label={`The end of ${view.name} fades out over ${beatsLabel(fadeOut)}. Its start fades in over ${beatsLabel(fadeIn)} and is at full volume ${pickup ? `${beatsLabel(pickup)} early` : 'on the 1'}.`}
         >
-          <rect width={1000} height={100} fill="#F4F4F1" />
-          <rect width={1000} y={100} height={100} fill="#FFFFFF" />
-          <rect x={x(fadeOutEnd - fadeOut)} width={x(fadeOutEnd) - x(fadeOutEnd - fadeOut)} height={100} fill="#E4E4DF" />
-          <rect x={x(-pickup - fadeIn)} y={100} width={x(-pickup) - x(-pickup - fadeIn)} height={100} fill="#FBE3D6" />
+          <rect width={1000} height={100} className="fill-wave-bg" />
+          <rect width={1000} y={100} height={100} className="fill-well" />
+          <rect x={x(fadeOutEnd - fadeOut)} width={x(fadeOutEnd) - x(fadeOutEnd - fadeOut)} height={100} className="fill-raised" />
+          <rect x={x(-pickup - fadeIn)} y={100} width={x(-pickup) - x(-pickup - fadeIn)} height={100} className="fill-accent-soft" />
           {ticks.map(beat => (
             <line
               key={beat}
@@ -347,28 +347,28 @@ function SeamView({
               x2={x(beat)}
               y1={0}
               y2={200}
-              stroke={beat === 0 ? '#6B6B66' : beat % bar === 0 ? '#C6C6C0' : '#ECECE7'}
+              className={beat === 0 ? 'stroke-muted' : beat % bar === 0 ? 'stroke-edge' : 'stroke-line'}
               strokeDasharray={beat === 0 ? '5 4' : undefined}
               vectorEffect="non-scaling-stroke"
             />
           ))}
           {waves && (
             <>
-              <path d={wavePath(waves.out, 0, () => 1)} fill="#DADAD4" />
-              <path d={wavePath(waves.out, 0, i => gainOut(beatOf(i)))} fill="#1C1C1A" />
-              <path d={wavePath(waves.into, 100, () => 1)} fill="#DADAD4" />
-              <path d={wavePath(waves.into, 100, i => gainIn(beatOf(i)))} fill="#C2410C" />
+              <path d={wavePath(waves.out, 0, () => 1)} className="fill-wave-rest/50" />
+              <path d={wavePath(waves.out, 0, i => gainOut(beatOf(i)))} className="fill-muted" />
+              <path d={wavePath(waves.into, 100, () => 1)} className="fill-wave-rest/50" />
+              <path d={wavePath(waves.into, 100, i => gainIn(beatOf(i)))} className="fill-accent" />
             </>
           )}
-          <line x1={0} x2={1000} y1={100} y2={100} stroke="#D4D4CE" vectorEffect="non-scaling-stroke" />
-          <polyline points={gainLine(gainOut, 0, [fadeOutEnd - fadeOut, fadeOutEnd])} fill="none" stroke="#1C1C1A" strokeWidth={2} vectorEffect="non-scaling-stroke" />
-          <polyline points={gainLine(gainIn, 100, [-pickup - fadeIn, -pickup])} fill="none" stroke="#C2410C" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+          <line x1={0} x2={1000} y1={100} y2={100} className="stroke-edge" vectorEffect="non-scaling-stroke" />
+          <polyline points={gainLine(gainOut, 0, [fadeOutEnd - fadeOut, fadeOutEnd])} fill="none" className="stroke-ink" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+          <polyline points={gainLine(gainIn, 100, [-pickup - fadeIn, -pickup])} fill="none" className="stroke-amber" strokeWidth={2} vectorEffect="non-scaling-stroke" />
         </svg>
-        <span className="pointer-events-none absolute left-1.5 top-1.5 rounded bg-white/85 px-1 font-mono text-xs text-muted">end of pass · bar {view.e}</span>
-        <span className="pointer-events-none absolute left-1.5 top-[calc(50%+6px)] rounded bg-white/85 px-1 font-mono text-xs text-muted">next pass · bar {view.s + 1}</span>
+        <span className="pointer-events-none absolute left-1.5 top-1.5 rounded-full bg-page/80 px-2 text-xs text-muted">end of pass · bar {view.e}</span>
+        <span className="pointer-events-none absolute left-1.5 top-[calc(50%+6px)] rounded-full bg-page/80 px-2 text-xs text-muted">next pass · bar {view.s + 1}</span>
         {buffer === null && <span className="absolute inset-0 flex items-center justify-center text-sm text-muted">This song has no audio.</span>}
         {rel !== null && rel >= -before && rel <= after && (
-          <div className="pointer-events-none absolute inset-y-0 w-0.5 bg-[#2563EB]" style={{ left: `${x(rel) / 10}%` }} data-playhead="seam" aria-hidden />
+          <div className="pointer-events-none absolute inset-y-0 w-0.5 bg-ink" style={{ left: `${x(rel) / 10}%` }} data-playhead="seam" aria-hidden />
         )}
         {handles.map(handle => (
           <div
@@ -381,7 +381,7 @@ function SeamView({
             aria-valuenow={handle.beat}
             aria-valuetext={handle.text}
             title={`${handle.label}: ${handle.text}`}
-            className="absolute z-10 -ml-3.5 -mt-3.5 flex h-7 w-7 cursor-ew-resize touch-none items-center justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#2563EB]"
+            className="absolute z-10 -ml-3.5 -mt-3.5 flex h-7 w-7 cursor-ew-resize touch-none items-center justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber"
             style={{ left: `${x(handle.beat) / 10}%`, top: handle.top }}
             onPointerDown={event => {
               event.currentTarget.setPointerCapture(event.pointerId);
@@ -399,11 +399,11 @@ function SeamView({
               handle.move(handle.beat + step);
             }}
           >
-            <span className="h-3.5 w-3.5 rounded-full border-2 bg-white" style={{ borderColor: handle.color }} />
+            <span className={`h-3.5 w-3.5 rounded-full border-2 bg-well ${handle.tone}`} />
           </div>
         ))}
       </div>
-      <div className="relative mt-1 h-4 font-mono text-[11px] text-muted" aria-hidden>
+      <div className="relative mt-1 h-4 tabular text-[11px] text-muted" aria-hidden>
         {ticks
           .filter(beat => beat % bar === 0)
           .map(beat => (
@@ -433,22 +433,22 @@ function PassWave({ grid, buffer, view, seam, heard }: { grid: Grid; buffer: Aud
   const every = downbeats.length > 16 ? 4 : 1;
 
   return (
-    <div className="relative h-20 select-none overflow-hidden rounded-md border border-line bg-wave-bg" aria-hidden>
+    <div className="relative h-20 select-none overflow-hidden rounded-xl border border-line bg-wave-bg" aria-hidden>
       <div className="absolute inset-y-0 bg-accent-soft" style={{ left: 0, width: `${x(singerStart)}%` }} />
-      <div className="absolute inset-y-0 bg-[#E4E4DF]" style={{ left: `${x(fade.start)}%`, width: `${Math.max(0, x(Math.min(fade.end, seam)) - x(fade.start))}%` }} />
+      <div className="absolute inset-y-0 bg-raised" style={{ left: `${x(fade.start)}%`, width: `${Math.max(0, x(Math.min(fade.end, seam)) - x(fade.start))}%` }} />
       {downbeats.map(item => (
         <div key={item.bar} className="absolute inset-y-0 border-l border-line" style={{ left: `${x(item.t)}%` }}>
-          {(item.bar - view.s - 1) % every === 0 && <span className="absolute left-1 top-0.5 font-mono text-[10px] text-muted">{item.bar}</span>}
+          {(item.bar - view.s - 1) % every === 0 && <span className="tabular absolute left-1 top-0.5 text-[10px] text-muted">{item.bar}</span>}
         </div>
       ))}
       {bars && (
         <svg viewBox={`0 0 ${COLUMNS} 100`} preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
           {bars.map((peak, i) => (
-            <rect key={i} x={i + 0.15} width={0.7} y={56 - peak * 40} height={peak * 80} fill={(i + 0.5) / COLUMNS < played ? '#1C1C1A' : '#A6A6A0'} />
+            <rect key={i} x={i + 0.15} width={0.7} y={56 - peak * 40} height={peak * 80} className={(i + 0.5) / COLUMNS < played ? 'fill-accent' : 'fill-wave-rest'} />
           ))}
         </svg>
       )}
-      {heard !== null && heard >= start && heard <= seam && <div className="absolute inset-y-0 w-0.5 bg-[#2563EB]" style={{ left: `${x(heard)}%` }} data-playhead="pass" />}
+      {heard !== null && heard >= start && heard <= seam && <div className="absolute inset-y-0 w-0.5 bg-ink" style={{ left: `${x(heard)}%` }} data-playhead="pass" />}
     </div>
   );
 }

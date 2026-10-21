@@ -284,7 +284,7 @@ async function main() {
     await waitFor(`!__djw.engine.transport.playing && !document.body.innerText.includes('Re-tapping')`, 'Stop ends the re-tap');
 
     // Re-tap one section: old taps stay until new ones replace them, taps before it are ignored, and it stops at its end.
-    const tapped = `[...document.querySelectorAll('svg[viewBox="0 0 1000 14"] line')].filter(l => l.getAttribute('stroke') !== '#D4D4CE').length`;
+    const tapped = `[...document.querySelectorAll('svg[viewBox="0 0 1000 14"] line')].filter(l => !l.classList.contains('stroke-edge')).length`;
     check('24 taps before the re-tap', (await ev<number>(tapped)) === 24, await ev(tapped));
     await clickAt(`document.querySelector('[aria-label="Re-tap Verse 1"]')`);
     await waitFor(`__djw.engine.transport.playing && document.body.innerText.includes('Re-tapping Verse 1')`, 're-tap plays the section');
@@ -402,7 +402,7 @@ async function main() {
     // Export.
     await waitFor(`document.body.innerText.includes('Ready: all 4 checks pass')`, 'all 4 checks pass');
     await click('Change name or folder…');
-    await type('input.font-mono', 'morning-test');
+    await type('input[name=fileName]', 'morning-test');
     await clickAt(`document.querySelector('input[type=checkbox]')`);
     await shot('4-export');
     const saved = chrome.browser.once('Browser.downloadProgress', p => p.state === 'completed');

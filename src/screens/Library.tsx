@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from 
 import { Play, Square, Trash2 } from 'lucide-react';
 import type { Song } from '../types';
 import { go, useStore } from '../store';
-import { Button, Card, Label, LinkButton, MiniStrip } from '../ui';
+import { Button, Card, Label, LinkButton, MiniStrip, RestingBars } from '../ui';
 import { PAD_ALBUM, helper, importPad, importSong, jobKind, queueLink, splitTitle, type Job } from '../lib/library';
 import { parseDjw, type DjwMap } from '../lib/djw';
 import { KEY_NAMES } from '../lib/music';
@@ -79,7 +79,7 @@ export function Library() {
   return (
     <div>
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-4xl font-bold tracking-tight">Library</h1>
+        <h1 className="text-4xl font-extrabold tracking-tight">Library</h1>
         <div className="flex gap-2">
           <Button onClick={() => djwInput.current?.click()}>Import .djw</Button>
           <Button onClick={() => go({ page: 'sets', id: store.newSet().id })}>New set</Button>
@@ -98,7 +98,7 @@ export function Library() {
       </header>
 
       {notice && (
-        <p role="status" className="mb-4 flex items-center justify-between rounded-md border border-line bg-white px-4 py-3 text-sm">
+        <p role="status" className="mb-4 flex items-center justify-between rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-sm">
           {notice}
           <button type="button" className="text-muted hover:text-ink" onClick={() => setNotice(null)}>
             Dismiss
@@ -149,7 +149,7 @@ export function Library() {
                   type="button"
                   role="tab"
                   aria-selected={tab === id}
-                  className={`border-b-2 px-3.5 pb-3 pt-2 text-[17px] ${tab === id ? 'border-ink font-semibold' : 'border-transparent text-muted hover:text-ink'}`}
+                  className={`border-b-2 px-3.5 pb-3 pt-2 text-[17px] ${tab === id ? 'border-accent font-semibold' : 'border-transparent text-muted hover:text-ink'}`}
                   onClick={() => setTab(id)}
                 >
                   {label}
@@ -163,7 +163,7 @@ export function Library() {
                   type="search"
                   value={query}
                   onChange={event => setQuery(event.target.value)}
-                  className="w-52 rounded-md border border-faint px-3 py-2 text-ink"
+                  className="w-52 rounded-full border border-faint bg-well px-4 py-2 text-ink"
                 />
               </label>
             )}
@@ -176,7 +176,7 @@ export function Library() {
         </Card>
         {tab === 'songs' && selected && (
           <Card className="w-full p-5 lg:w-[312px]">
-            <h2 className="mb-4 text-2xl font-bold">{selected.title}</h2>
+            <h2 className="mb-4 text-2xl font-extrabold tracking-tight">{selected.title}</h2>
             <Label className="mb-2">Sections</Label>
             <MiniStrip views={sectionViews(selected)} />
             <Button className="mt-5 w-full" onClick={() => go({ page: 'song', id: selected.id, step: 'tap' })}>
@@ -215,7 +215,7 @@ function AddFromYouTube({ tab, onFile, onDropFiles }: { tab: 'songs' | 'pads'; o
     if (event.dataTransfer.files.length) onDropFiles(event.dataTransfer.files);
   };
   return (
-    <Card className={`px-5 py-4 ${over ? 'ring-2 ring-accent' : ''}`}>
+    <Card className={`px-5 py-4 ${over ? 'shadow-glow ring-2 ring-accent' : ''}`}>
       <div
         onDragOver={event => {
           event.preventDefault();
@@ -239,14 +239,14 @@ function AddFromYouTube({ tab, onFile, onDropFiles }: { tab: 'songs' | 'pads'; o
             value={url}
             onChange={event => setUrl(event.target.value)}
             placeholder={tab === 'pads' ? 'Paste a YouTube link to a pad' : 'Paste a YouTube link'}
-            className="min-w-0 flex-1 rounded-md border border-faint px-3.5 py-3 text-[17px] placeholder:text-faint"
+            className="min-w-0 flex-1 rounded-full border border-faint bg-well px-5 py-3 text-[17px]"
           />
           <Button tone="primary" type="submit" className="px-6 text-[17px]">
             Download
           </Button>
         </form>
         {(error || helperDown) && (
-          <p className="mt-2 text-sm text-accent">{error ?? 'The download helper is not running. Start it with npm run dev. You can still add audio files.'}</p>
+          <p className="mt-2 text-sm text-danger">{error ?? 'The download helper is not running. Start it with npm run dev. You can still add audio files.'}</p>
         )}
         {jobs.length > 0 && (
           <ul className="mt-3 space-y-2" aria-label="Downloads">
@@ -284,7 +284,7 @@ function JobRow({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
         {job.title ?? job.url} · {jobKind(job)}
       </span>
       {job.status === 'error' ? (
-        <span className="flex flex-1 items-center justify-between gap-3 text-sm text-accent">
+        <span className="flex flex-1 items-center justify-between gap-3 text-sm text-danger">
           <span className="truncate">{job.error}</span>
           <button type="button" className="text-muted underline" onClick={onDismiss}>
             Dismiss
@@ -292,10 +292,10 @@ function JobRow({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
         </span>
       ) : (
         <>
-          <span className="h-2 flex-1 overflow-hidden rounded-full bg-paper" role="progressbar" aria-valuenow={Math.round(job.percent)} aria-label={`${job.title ?? 'Download'} progress`}>
-            <span className="block h-full bg-accent transition-[width]" style={{ width: `${job.percent}%` }} />
+          <span className="h-2 flex-1 overflow-hidden rounded-full bg-raised" role="progressbar" aria-valuenow={Math.round(job.percent)} aria-label={`${job.title ?? 'Download'} progress`}>
+            <span className="block h-full rounded-full bg-accent shadow-glow-sm transition-[width]" style={{ width: `${job.percent}%` }} />
           </span>
-          <span className="w-32 text-right font-mono text-xs text-muted">{status}</span>
+          <span className="tabular w-32 text-right text-xs text-muted">{status}</span>
         </>
       )}
     </li>
@@ -304,16 +304,21 @@ function JobRow({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
 
 function SongTable({ songs, selected, onSelect, onStep, inSet }: { songs: Song[]; selected: Song | null; onSelect: (id: string) => void; onStep: (song: Song, step: Step) => void; inSet: (id: string) => boolean }) {
   if (songs.length === 0) {
-    return <p className="px-5 py-10 text-center text-muted">No songs yet. Paste a YouTube link above or add an audio file.</p>;
+    return (
+      <div className="flex flex-col items-center gap-3 px-5 py-10 text-center text-muted">
+        <RestingBars />
+        <p>No songs yet. Paste a YouTube link above or add an audio file.</p>
+      </div>
+    );
   }
   return (
     <table className="w-full text-left">
       <thead>
-        <tr className="border-b border-line font-mono text-xs uppercase tracking-wider text-muted">
-          <th className="px-4 py-3 font-normal">Song</th>
-          <th className="w-20 py-3 font-normal">BPM</th>
-          <th className="w-24 py-3 font-normal">Keys</th>
-          <th className="w-40 py-3 pr-4 font-normal">Next step</th>
+        <tr className="caps border-b border-line text-muted">
+          <th className="px-4 py-3">Song</th>
+          <th className="w-20 py-3">BPM</th>
+          <th className="w-24 py-3">Keys</th>
+          <th className="w-40 py-3 pr-4">Next step</th>
         </tr>
       </thead>
       <tbody>
@@ -325,7 +330,7 @@ function SongTable({ songs, selected, onSelect, onStep, inSet }: { songs: Song[]
               key={song.id}
               aria-selected={song.id === selected?.id}
               tabIndex={0}
-              className={`cursor-pointer border-b border-line last:border-0 ${song.id === selected?.id ? 'bg-accent-soft' : 'hover:bg-paper/60'}`}
+              className={`cursor-pointer border-b border-line last:border-0 ${song.id === selected?.id ? 'bg-accent-soft shadow-[inset_3px_0_0_rgb(var(--accent))]' : 'hover:bg-raised/60'}`}
               onClick={() => onSelect(song.id)}
               onKeyDown={event => {
                 if (event.key === 'Enter' || event.key === ' ') {
@@ -338,8 +343,8 @@ function SongTable({ songs, selected, onSelect, onStep, inSet }: { songs: Song[]
                 <p className="font-medium">{song.title}</p>
                 <p className="text-sm text-muted">{song.artist || 'Unknown artist'}</p>
               </td>
-              <td className="font-mono">{bpm ? Math.round(bpm) : '—'}</td>
-              <td className="font-mono">{keysText(songKeys(song))}</td>
+              <td className="tabular">{bpm ? Math.round(bpm) : '—'}</td>
+              <td className="tabular">{keysText(songKeys(song))}</td>
               <td className="pr-4">
                 <LinkButton
                   onClick={event => {
@@ -394,7 +399,7 @@ function PadTable() {
     <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
       <div className="flex gap-1" aria-label={`Pads in ${pads.length ? [...have].map(tonic => KEY_NAMES[tonic]).join(', ') : 'no keys yet'}`}>
         {KEY_NAMES.map((name, tonic) => (
-          <span key={name} className={`w-8 rounded py-1 text-center font-mono text-xs ${have.has(tonic) ? 'bg-ink text-white' : 'border border-dashed border-faint text-muted'}`}>
+          <span key={name} className={`w-9 rounded-full py-1 text-center text-xs font-semibold ${have.has(tonic) ? 'bg-accent-soft text-amber ring-1 ring-accent/40' : 'border border-dashed border-faint text-muted'}`}>
             {name}
           </span>
         ))}
@@ -406,7 +411,7 @@ function PadTable() {
       )}
       <p className="w-full text-xs text-muted">
         {missing.length > 0 ? `From ${PAD_ALBUM.name} on YouTube. Or paste any pad link above.` : 'Every key has a pad.'}
-        {error && <span className="ml-2 text-accent">{error}</span>}
+        {error && <span className="ml-2 text-danger">{error}</span>}
       </p>
     </div>
   );
@@ -414,7 +419,10 @@ function PadTable() {
     return (
       <>
         {keys}
-        <p className="px-5 py-10 text-center text-muted">No pads yet. Perform plays pads between songs, one per key.</p>
+        <div className="flex flex-col items-center gap-3 px-5 py-10 text-center text-muted">
+          <RestingBars />
+          <p>No pads yet. Perform plays pads between songs, one per key.</p>
+        </div>
       </>
     );
   }
@@ -423,11 +431,11 @@ function PadTable() {
     {keys}
     <table className="w-full text-left">
       <thead>
-        <tr className="border-b border-line font-mono text-xs uppercase tracking-wider text-muted">
-          <th className="px-4 py-3 font-normal">Pad</th>
-          <th className="w-24 py-3 font-normal">Key</th>
-          <th className="w-24 py-3 font-normal">Length</th>
-          <th className="w-28 py-3 pr-4 font-normal">
+        <tr className="caps border-b border-line text-muted">
+          <th className="px-4 py-3">Pad</th>
+          <th className="w-24 py-3">Key</th>
+          <th className="w-24 py-3">Length</th>
+          <th className="w-28 py-3 pr-4">
             <span className="sr-only">Actions</span>
           </th>
         </tr>
@@ -441,7 +449,7 @@ function PadTable() {
                 aria-label={`Key of ${pad.title}`}
                 value={pad.tonic}
                 onChange={event => savePad({ ...pad, tonic: Number(event.target.value) })}
-                className="rounded border border-line bg-white px-2 py-1 font-mono"
+                className="rounded-full border border-edge bg-well px-3 py-1 font-medium"
               >
                 {KEY_NAMES.map((name, tonic) => (
                   <option key={name} value={tonic}>
@@ -450,15 +458,15 @@ function PadTable() {
                 ))}
               </select>
             </td>
-            <td className="font-mono text-sm">{clock(pad.duration)}</td>
+            <td className="tabular text-sm">{clock(pad.duration)}</td>
             <td className="pr-4">
               <div className="flex justify-end gap-1">
-                <button type="button" className="rounded p-2 hover:bg-paper" aria-label={`${playing === pad.id ? 'Stop' : 'Preview'} ${pad.title}`} onClick={() => void preview(pad.id)}>
+                <button type="button" className="rounded-full p-2 text-amber hover:bg-raised" aria-label={`${playing === pad.id ? 'Stop' : 'Preview'} ${pad.title}`} onClick={() => void preview(pad.id)}>
                   {playing === pad.id ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
                 </button>
                 <button
                   type="button"
-                  className="rounded p-2 hover:bg-paper"
+                  className="rounded-full p-2 text-muted hover:bg-raised hover:text-danger"
                   aria-label={`Remove ${pad.title}`}
                   onClick={() => {
                     if (confirm(`Remove ${pad.title}?`)) void removePad(pad.id);

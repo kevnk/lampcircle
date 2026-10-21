@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Pause, Play, Square } from 'lucide-react';
 import type { Song, WorshipSet } from '../types';
 import { go, useStore } from '../store';
-import { useFrame, useKeys } from '../ui';
+import { ThemeToggle, useFrame, useKeys } from '../ui';
 import { PerformSession, now, padSourceFor, perfSong, release, type PerfSong, type Snapshot } from '../audio/engine';
 import { KEY_NAMES, padFit, padGroups } from '../lib/music';
 import { barSeconds, clock, keyOf, planSeconds, sectionViews, songGrid, songKeys, type SectionView } from '../lib/songMap';
@@ -30,7 +30,7 @@ const JUMP_FADES: Array<[JumpFade, string, string]> = [
   ['edited', 'As edited', 'Each section keeps the fades you set in Transitions.'],
 ];
 
-const option = (active: boolean) => `rounded-md border px-3.5 py-2.5 ${active ? 'border-stage-text bg-stage-text text-stage-bg' : 'border-stage-line hover:bg-stage-card'}`;
+const option = (active: boolean) => `rounded-full border px-4 py-2.5 ${active ? 'border-accent bg-accent-soft font-semibold text-amber' : 'border-line hover:bg-panel'}`;
 
 function loadPrefs(): Prefs {
   try {
@@ -296,11 +296,11 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   const keyNow = isSong ? (snap?.song ? views[snap.song.idx]?.key : views[0]?.key) : snap?.pad ? KEY_NAMES[snap.pad.tonic] : null;
 
   return (
-    <div className="flex min-h-full flex-col bg-stage-bg text-stage-text">
-      <header className="flex items-center gap-4 border-b border-stage-line px-6 py-3">
+    <div className="flex min-h-full flex-col">
+      <header className="flex items-center gap-4 border-b border-line px-6 py-3">
         <button
           type="button"
-          className={`rounded-md border px-3.5 py-2 ${exitArmed ? 'border-stage-accent text-stage-accent' : 'border-stage-line hover:bg-stage-card'}`}
+          className={`rounded-full border px-4 py-2 ${exitArmed ? 'border-danger text-danger' : 'border-line hover:bg-panel'}`}
           onClick={() => {
             if (exitArmed || finished || (!started && isSong)) return go({ page: 'sets', id: set.id });
             setExitArmed(true);
@@ -309,15 +309,16 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
         >
           {exitArmed ? 'Tap again to stop' : 'Exit'}
         </button>
+        <ThemeToggle />
         <div className="ml-auto flex items-center gap-5">
           {lastItem ? (
-            <button type="button" className="flex items-center gap-2 rounded-md border border-stage-line px-4 py-2 hover:bg-stage-card" onClick={fadeOutEnd}>
+            <button type="button" className="flex items-center gap-2 rounded-full border border-line px-4 py-2 hover:bg-panel" onClick={fadeOutEnd}>
               <Square className="h-4 w-4 fill-current" />
               End set
             </button>
           ) : (started || !isSong) && !finished && (
             <div className="flex items-center gap-3">
-              <button type="button" className="flex items-center gap-2 rounded-md border border-stage-line px-4 py-2 hover:bg-stage-card" onClick={togglePause}>
+              <button type="button" className="flex items-center gap-2 rounded-full border border-line px-4 py-2 hover:bg-panel" onClick={togglePause}>
                 {snap?.paused ? <Play className="h-4 w-4 fill-current" /> : <Pause className="h-4 w-4 fill-current" />}
                 {snap?.paused ? 'Resume' : 'Pause'}
               </button>
@@ -326,22 +327,23 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
                 role="switch"
                 aria-checked={prefs.fadePause}
                 title={`Pause fades out over ${PAUSE_FADE.out} bars, and Resume fades back in over ${PAUSE_FADE.in}.`}
-                className="flex items-center gap-2 py-2 text-sm text-stage-muted hover:text-stage-text"
+                className="flex items-center gap-2 py-2 text-sm text-muted hover:text-ink"
                 onClick={() => savePrefs({ fadePause: !prefs.fadePause })}
               >
-                <span className={`relative h-5 w-9 rounded-full transition-colors ${prefs.fadePause ? 'bg-stage-accent' : 'bg-stage-line'}`}>
-                  <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-stage-text transition-transform ${prefs.fadePause ? 'translate-x-4' : ''}`} />
+                <span className={`relative h-5 w-9 rounded-full transition-colors ${prefs.fadePause ? 'bg-accent shadow-glow-sm' : 'bg-edge/60'}`}>
+                  <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-cream shadow transition-transform ${prefs.fadePause ? 'translate-x-4' : ''}`} />
                 </span>
                 Fade
               </button>
             </div>
           )}
-          <p className="font-mono text-3xl tabular" aria-label="Position">
+          <p className="tabular text-3xl font-bold" aria-label="Position">
             Bar {position && position.bar > 0 ? position.bar : '—'} · {position?.beat ?? '—'}
           </p>
-          <div className="flex gap-1.5" aria-hidden>
+          {/* The logo's sound bars, lit on each beat. Beat 1 stands tallest. */}
+          <div className="flex items-center gap-1.5" aria-hidden>
             {Array.from({ length: position?.per ?? 4 }, (_, i) => (
-              <span key={i} className={`h-4 w-4 rounded-full ${position?.beat === i + 1 ? 'bg-stage-accent' : 'bg-stage-line'}`} />
+              <span key={i} className={`w-2 rounded-full ${i === 0 ? 'h-7' : 'h-5'} ${position?.beat === i + 1 ? 'bg-accent shadow-glow-sm' : 'bg-edge/50'}`} />
             ))}
           </div>
           {isSong && (
@@ -355,7 +357,7 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
 
       <div className="grid flex-1 grid-cols-[200px_minmax(0,1fr)_290px] max-lg:grid-cols-[minmax(0,1fr)_260px]">
         <SetList set={set} items={items} current={current} viewing={viewing} onView={show} />
-        <main className="border-x border-stage-line px-6 py-6 max-lg:border-l-0">
+        <main className="border-x border-line px-6 py-6 max-lg:border-l-0">
           <Pager
             label={viewing !== null ? `Song ${viewing + 1} of ${items.length}` : finished ? 'End of the set' : isSong ? `Song ${songIndex + 1} of ${items.length}` : `Pad after song ${songIndex + 1}`}
             prev={pagePrev === null ? undefined : items[pagePrev]}
@@ -373,8 +375,8 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
             />
           ) : finished ? (
             <div className="py-16 text-center">
-              <p className="text-3xl font-bold">That is the set.</p>
-              <button type="button" className="mt-6 rounded-md bg-stage-text px-5 py-3 font-medium text-stage-bg" onClick={() => go({ page: 'sets', id: set.id })}>
+              <p className="text-3xl font-extrabold tracking-tight">That is the set.</p>
+              <button type="button" className="mt-6 rounded-full bg-ink text-page px-6 py-3 font-semibold" onClick={() => go({ page: 'sets', id: set.id })}>
                 Back to Sets
               </button>
             </div>
@@ -384,7 +386,7 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
             <PadPanel left={left} next={next} snap={snap} mode={prefs.mode} onMode={mode => savePrefs({ mode })} onPad={pickPad} onPadOff={padMoves.off} way={way} picked={wayIn(set, left, next).picked} opener={firstPad(left, next)} step={walkStep.current} have={have} />
           ) : null}
         </main>
-        <aside className="px-5 py-6 max-lg:col-span-2 max-lg:border-t max-lg:border-stage-line">
+        <aside className="px-5 py-6 max-lg:col-span-2 max-lg:border-t max-lg:border-line">
           {finished ? null : isSong && song ? (
             <OnDeck
               song={song}
@@ -428,8 +430,8 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="leading-tight">
-      <p className="font-mono text-[11px] uppercase tracking-wider text-stage-muted">{label}</p>
-      <p className="font-mono text-xl">{value}</p>
+      <p className="caps text-muted">{label}</p>
+      <p className="tabular text-xl font-semibold">{value}</p>
     </div>
   );
 }
@@ -437,7 +439,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 function SetList({ set, items, current, viewing, onView }: { set: WorshipSet; items: Song[]; current: number; viewing: number | null; onView: (index: number) => void }) {
   return (
     <nav className="px-3 py-5 max-lg:hidden" aria-label="Set">
-      <p className="mb-3 px-1 font-mono text-xs uppercase tracking-wider text-stage-muted">Set</p>
+      <p className="mb-3 px-1 caps text-muted">Set</p>
       <ol className="space-y-1">
         {items.flatMap((song, i) => {
           const pad = livePad(song, items[i + 1]);
@@ -461,23 +463,23 @@ function Row(props: { index: number; current: number; lead: string; title: strin
   const { index, current, lead, title, tail, mono, viewing, onClick } = props;
   const state = index < current ? 'done' : index === current ? 'now' : index === current + 1 ? 'deck' : 'later';
   const style = {
-    done: 'text-stage-muted line-through',
-    now: 'bg-stage-card',
-    deck: 'border border-dashed border-stage-muted',
+    done: 'text-muted line-through',
+    now: 'bg-accent-soft font-semibold shadow-[inset_3px_0_0_rgb(var(--accent))]',
+    deck: 'border border-dashed border-accent/50',
     later: '',
   }[state];
-  const className = `flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left text-sm ${style} ${viewing ? 'ring-2 ring-inset ring-stage-accent' : ''}`;
+  const className = `flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left text-sm ${style} ${viewing ? 'ring-2 ring-inset ring-accent' : ''}`;
   const body = (
     <>
-      <span className="w-7 shrink-0 font-mono text-xs text-stage-muted">{lead}</span>
-      <span className={`min-w-0 flex-1 ${mono ? 'font-mono' : ''}`}>{title}</span>
-      {tail && <span className="shrink-0 font-mono text-xs">{tail}</span>}
+      <span className="w-7 shrink-0 tabular text-xs text-muted">{lead}</span>
+      <span className={`min-w-0 flex-1 ${mono ? 'tabular' : ''}`}>{title}</span>
+      {tail && <span className="shrink-0 text-xs font-semibold">{tail}</span>}
     </>
   );
   return (
     <li aria-current={state === 'now' ? 'step' : undefined}>
       {onClick ? (
-        <button type="button" className={`${className} hover:bg-stage-card`} aria-pressed={viewing} onClick={onClick}>
+        <button type="button" className={`${className} hover:bg-panel`} aria-pressed={viewing} onClick={onClick}>
           {body}
         </button>
       ) : (
@@ -488,14 +490,14 @@ function Row(props: { index: number; current: number; lead: string; title: strin
 }
 
 function Pager({ label, prev, next, onPage }: { label: string; prev?: Song; next?: Song; onPage: (dir: 1 | -1) => void }) {
-  const button = 'flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-stage-line px-3 py-2 text-sm hover:bg-stage-card disabled:invisible';
+  const button = 'flex min-w-0 max-w-full items-center gap-1.5 rounded-full border border-line px-3.5 py-2 text-sm hover:bg-panel disabled:invisible';
   return (
     <div className="mb-5 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
       <button type="button" className={`${button} justify-self-start`} disabled={!prev} aria-label={prev && `Previous song, ${prev.title}`} onClick={() => onPage(-1)}>
         <ChevronLeft className="h-4 w-4 shrink-0" />
         <span className="truncate">{prev?.title}</span>
       </button>
-      <p className="shrink-0 font-mono text-xs uppercase tracking-wider text-stage-muted">{label}</p>
+      <p className="shrink-0 caps text-muted">{label}</p>
       <button type="button" className={`${button} justify-self-end`} disabled={!next} aria-label={next && `Next song, ${next.title}`} onClick={() => onPage(1)}>
         <span className="truncate">{next?.title}</span>
         <ChevronRight className="h-4 w-4 shrink-0" />
@@ -509,14 +511,14 @@ function BrowseSong(props: { song: Song; ready: boolean; arriving: string | null
   const { song, ready, arriving, live } = props;
   return (
     <div>
-      <div className="mb-5 flex min-h-[64px] items-center justify-between gap-4 rounded-lg border border-stage-accent px-4 py-3">
+      <div className="mb-5 flex min-h-[64px] items-center justify-between gap-4 rounded-2xl border border-accent/60 bg-accent/[0.07] px-4 py-3">
         <p aria-live="polite">{live ? <>Now playing: <b>{live}</b></> : 'Nothing is playing yet.'}</p>
-        <button type="button" className="shrink-0 rounded-md border border-stage-line px-4 py-2 hover:bg-stage-card" onClick={props.onBack}>
+        <button type="button" className="shrink-0 rounded-full border border-line px-4 py-2 hover:bg-panel" onClick={props.onBack}>
           Back to it
         </button>
       </div>
-      <h1 className="text-4xl font-bold">{song.title}</h1>
-      <p className="mb-5 mt-2 text-stage-muted">
+      <h1 className="text-4xl font-extrabold tracking-tight">{song.title}</h1>
+      <p className="mb-5 mt-2 text-muted">
         {!ready ? 'Loading…' : arriving ? `Wait for ${arriving} to come in.` : `Tap a section to bring it in on the next bar.${live ? ' What is playing fades out.' : ''}`}
       </p>
       <SectionTiles views={sectionViews(song)} disabled={!ready || Boolean(arriving)} onPick={props.onPick} />
@@ -526,7 +528,7 @@ function BrowseSong(props: { song: Song; ready: boolean; arriving: string | null
 
 function SectionTiles({ views, playing, queued, disabled, onPick }: { views: SectionView[]; playing?: number; queued?: number; disabled: boolean; onPick: (index: number) => void }) {
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
       {views.map((view, i) => {
         const isPlaying = playing === i;
         const isQueued = queued === i && !isPlaying;
@@ -536,14 +538,14 @@ function SectionTiles({ views, playing, queued, disabled, onPick }: { views: Sec
             type="button"
             disabled={disabled}
             onClick={() => onPick(i)}
-            className={`min-h-[104px] rounded-lg border px-3.5 py-3 text-left transition-colors ${isPlaying ? 'border-stage-accent bg-stage-accent text-stage-bg' : isQueued ? 'border-2 border-stage-accent bg-stage-card' : 'border-stage-line bg-stage-card hover:border-stage-muted'} disabled:cursor-default`}
+            className={`min-h-[104px] rounded-2xl border px-3.5 py-3 text-left transition ${isPlaying ? 'border-accent bg-accent text-navy shadow-glow' : isQueued ? 'border-2 border-accent bg-panel' : 'border-line bg-panel hover:border-edge'} disabled:cursor-default`}
           >
-            <span className="flex justify-between font-mono text-xs">
+            <span className="flex justify-between text-xs font-semibold tracking-[0.2em]">
               <span>{i + 1}</span>
               <span>{isPlaying ? 'PLAYING' : isQueued ? 'NEXT' : ''}</span>
             </span>
-            <span className="mt-2 block text-2xl font-semibold">{view.name}</span>
-            <span className={`mt-1 block font-mono text-xs ${isPlaying ? '' : 'text-stage-muted'}`}>
+            <span className="mt-2 block text-[22px] font-bold leading-tight tracking-tight">{view.name}</span>
+            <span className={`mt-1 block tabular text-xs ${isPlaying ? '' : 'text-muted'}`}>
               {view.e - view.s} bars · {view.key ?? '—'}
             </span>
           </button>
@@ -568,7 +570,7 @@ function SongPads(props: { song: Song; snap: Snapshot['song']; started: boolean;
   return (
     <div>
       <div className="mb-5 flex flex-wrap items-baseline justify-between gap-3">
-        <h1 className="text-4xl font-bold">{song.title}</h1>
+        <h1 className="text-4xl font-extrabold tracking-tight">{song.title}</h1>
         {snap && current && (
           <p className="text-[17px]" aria-live="polite">
             Now: <b>{current.name}</b>
@@ -578,16 +580,16 @@ function SongPads(props: { song: Song; snap: Snapshot['song']; started: boolean;
       </div>
       {!started && (
         <div className="mb-5 flex flex-wrap items-center gap-4">
-          <button type="button" disabled={!ready} className="flex items-center gap-2 rounded-md bg-stage-accent px-6 py-4 text-lg font-semibold text-stage-bg disabled:opacity-50" onClick={() => onStart(0)}>
+          <button type="button" disabled={!ready} className="flex items-center gap-2 rounded-full bg-accent px-7 py-4 text-lg font-semibold text-navy shadow-glow-sm hover:bg-accent-hover disabled:opacity-50" onClick={() => onStart(0)}>
             <Play className="h-5 w-5 fill-current" />
             {ready ? `Start ${views[0]?.name ?? 'song'}` : 'Loading…'}
           </button>
-          {ready && <p className="text-stage-muted">Or tap any section to start there.</p>}
+          {ready && <p className="text-muted">Or tap any section to start there.</p>}
         </div>
       )}
       <SectionTiles views={views} playing={snap?.idx} queued={next?.idx} disabled={!ready} onPick={i => (started ? session?.pickSection(i) : onStart(i))} />
       {snap && (
-        <div className="mt-5 flex min-h-[78px] items-center justify-between gap-4 rounded-lg border border-stage-line px-4 py-3">
+        <div className="mt-5 flex min-h-[78px] items-center justify-between gap-4 rounded-2xl border border-line bg-panel px-4 py-3">
           <p aria-live="polite">
             {snap.hold && current
               ? `Holding ${current.name}. It loops until you pick a section or let go.`
@@ -598,7 +600,7 @@ function SongPads(props: { song: Song; snap: Snapshot['song']; started: boolean;
                   : ''}
           </p>
           {next?.reason === 'pick' && (
-            <button type="button" className="rounded-md border border-stage-line px-4 py-2 hover:bg-stage-card" onClick={() => session?.cancel()}>
+            <button type="button" className="rounded-full border border-line px-4 py-2 hover:bg-raised" onClick={() => session?.cancel()}>
               Cancel
             </button>
           )}
@@ -608,7 +610,7 @@ function SongPads(props: { song: Song; snap: Snapshot['song']; started: boolean;
         <button
           type="button"
           aria-pressed={snap.hold}
-          className={`mt-5 rounded-md border px-4 py-3 ${snap.hold ? 'border-stage-accent text-stage-accent' : 'border-stage-line hover:bg-stage-card'}`}
+          className={`mt-5 rounded-full border px-5 py-3 ${snap.hold ? 'border-accent bg-accent-soft font-semibold text-amber' : 'border-line hover:bg-panel'}`}
           onClick={() => session?.toggleHold()}
         >
           {snap.hold ? 'Holding · let go' : 'Hold here'}
@@ -649,18 +651,18 @@ function OnDeck(props: {
   const tail = !padIn && snap?.padFading;
   return (
     <div>
-      <p className="mb-3 font-mono text-xs uppercase tracking-wider text-stage-muted">On deck</p>
-      <div className="rounded-lg border border-dashed border-stage-muted p-4">
+      <p className="mb-3 caps text-muted">On deck</p>
+      <div className="rounded-2xl border border-dashed border-accent/50 bg-accent/[0.06] p-4">
         <p className="flex flex-wrap items-baseline gap-x-2">
           <span className="text-lg font-semibold">Live pad</span>
-          <span className="text-xs text-stage-muted">
+          <span className="text-xs text-muted">
             leaving {pad.from} · {next ? `next song in ${pad.to}` : 'end of the set'}
           </span>
         </p>
-        <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-stage-muted">
+        <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
           {props.plan.picked ? 'Your pads' : 'Way in'}
           {props.plan.tonics.map((key, k) => (
-            <span key={`${key}-${k}`} className={`rounded border px-1.5 py-0.5 font-mono ${have.has(key) ? 'border-stage-line text-stage-text' : 'border-dashed border-stage-line'}`}>
+            <span key={`${key}-${k}`} className={`rounded-full border px-2 py-0.5 font-semibold ${have.has(key) ? 'border-accent/50 text-amber' : 'border-dashed border-line'}`}>
               {KEY_NAMES[key]}
             </span>
           ))}
@@ -668,29 +670,29 @@ function OnDeck(props: {
         <button
           type="button"
           disabled={!started || !(padIn || have.has(props.gapPad)) || snap?.song?.forced}
-          className="mt-3 w-full rounded-md bg-stage-text px-4 py-3.5 text-lg font-semibold text-stage-bg disabled:opacity-60"
+          className="mt-3 w-full rounded-full bg-ink text-page px-4 py-3.5 text-lg font-semibold disabled:opacity-60"
           onClick={() => pads.go(props.gapPad)}
         >
           Go to pad ({KEY_NAMES[padIn ? padIn.tonic : props.gapPad]})
         </button>
-        <p className="mt-3 text-sm text-stage-muted">
+        <p className="mt-3 text-sm text-muted">
           {padIn || have.has(props.gapPad) ? 'Go to pad fades the song out over 2 bars as the pad comes in.' : `No pad in ${KEY_NAMES[props.gapPad]} yet. Get pads in Library, on the Pads tab.`}
         </p>
       </div>
-      <div className="mt-4 rounded-lg border border-stage-line p-4">
+      <div className="mt-4 rounded-2xl border border-line bg-panel p-4">
         <p className="flex flex-wrap items-baseline gap-x-2">
           <span className="text-lg font-semibold">Under the song</span>
-          <span className="text-xs text-stage-muted">{padIn ? `${KEY_NAMES[padIn.tonic]} pad now` : `this section is in ${KEY_NAMES[sectionKey]}`}</span>
+          <span className="text-xs text-muted">{padIn ? `${KEY_NAMES[padIn.tonic]} pad now` : `this section is in ${KEY_NAMES[sectionKey]}`}</span>
         </p>
         <button
           type="button"
           disabled={!started || (tail ? props.padOff : !canPad)}
-          className="mt-3 w-full rounded-md border border-stage-line px-4 py-2.5 hover:bg-stage-card disabled:opacity-50"
+          className="mt-3 w-full rounded-full border border-edge px-4 py-2.5 hover:bg-raised disabled:opacity-50"
           onClick={() => (padIn || tail ? pads.off() : pads.under(sectionKey))}
         >
           {padIn || (tail && !props.padOff) ? 'Turn pad off' : tail ? 'Pad fading out' : `Pad under the song (${KEY_NAMES[sectionKey]})`}
         </button>
-        <p className="mt-3 text-sm text-stage-muted">It comes in at the next phrase and follows each section&apos;s key. Tap a key to change it until the next section.</p>
+        <p className="mt-3 text-sm text-muted">It comes in at the next phrase and follows each section&apos;s key. Tap a key to change it until the next section.</p>
         <div className="mt-3 grid grid-cols-6 gap-1.5">
           {KEY_NAMES.map((name, key) => {
             const isNow = padIn?.tonic === key;
@@ -702,7 +704,7 @@ function OnDeck(props: {
                 disabled={!started || !have.has(key) || snap?.song?.forced}
                 aria-pressed={isNow}
                 aria-label={`Pad under the song in ${name}${isNow ? ', sounding now' : isSection ? ", this section's key" : ''}`}
-                className={`rounded-md border py-2 font-mono text-sm ${isNow ? 'border-stage-text bg-stage-text text-stage-bg' : isSection ? 'border-stage-accent hover:bg-stage-card' : 'border-stage-line hover:bg-stage-card'} disabled:cursor-not-allowed disabled:border-dashed disabled:opacity-40`}
+                className={`rounded-full border py-2 text-sm font-semibold ${isNow ? 'border-accent bg-accent text-navy shadow-glow-sm' : isSection ? 'border-2 border-accent hover:bg-raised' : 'border-line hover:bg-raised'} disabled:cursor-not-allowed disabled:border-dashed disabled:opacity-40`}
                 onClick={() => pads.change(key)}
               >
                 {name}
@@ -713,7 +715,7 @@ function OnDeck(props: {
       </div>
       {next && (
         <div className="mt-4">
-          <p className="mb-2 text-sm text-stage-muted">Then</p>
+          <p className="mb-2 text-sm text-muted">Then</p>
           <NextSong
             next={next}
             startAt={props.startAt}
@@ -724,7 +726,7 @@ function OnDeck(props: {
           />
         </div>
       )}
-      <div className="mt-4 rounded-lg border border-stage-line p-4">
+      <div className="mt-4 rounded-2xl border border-line bg-panel p-4">
         <Choice title="Jumps to another section">
           {JUMP_FADES.map(([value, label]) => (
             <button key={value} type="button" aria-pressed={prefs.jumpFade === value} className={option(prefs.jumpFade === value)} onClick={() => onPrefs({ jumpFade: value })}>
@@ -732,21 +734,21 @@ function OnDeck(props: {
             </button>
           ))}
         </Choice>
-        <p className="mt-2 text-sm text-stage-muted">{JUMP_FADES.find(([value]) => value === prefs.jumpFade)?.[2]} Going on to the next section plays straight through.</p>
+        <p className="mt-2 text-sm text-muted">{JUMP_FADES.find(([value]) => value === prefs.jumpFade)?.[2]} Going on to the next section plays straight through.</p>
         <label className="mt-3 flex items-start gap-3">
           <input type="checkbox" className="mt-1 h-4 w-4" checked={prefs.fillGaps} onChange={event => onPrefs({ fillGaps: event.target.checked })} />
           <span>
             Fill any silence with a pad
-            <span className="block text-xs text-stage-muted">In the key of the section coming in</span>
+            <span className="block text-xs text-muted">In the key of the section coming in</span>
           </span>
         </label>
       </div>
-      <button type="button" className="mt-4 flex items-center gap-1.5 px-1 py-1" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button type="button" className="mt-4 flex items-center gap-1.5 rounded-full px-2 py-1 text-muted hover:text-ink" aria-expanded={open} onClick={() => setOpen(!open)}>
         More <ChevronDown className={`h-4 w-4 ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
         <div className="mt-2 space-y-2">
-          <button type="button" disabled={!started || snap?.song?.forced} className="w-full rounded-md border border-stage-line px-4 py-2.5 text-left hover:bg-stage-card disabled:opacity-50" onClick={() => session?.endSong(2)}>
+          <button type="button" disabled={!started || snap?.song?.forced} className="w-full rounded-full border border-line px-4 py-2.5 text-left hover:bg-panel disabled:opacity-50" onClick={() => session?.endSong(2)}>
             End song now (fade over 2 bars)
           </button>
         </div>
@@ -795,19 +797,19 @@ function PadPanel(props: {
         type="button"
         disabled={missing}
         onClick={() => onPad(tonic)}
-        className={`rounded-lg border px-4 py-3 text-left ${wide ? 'min-h-[88px]' : 'min-h-[92px]'} ${isNow ? 'border-stage-text bg-stage-text text-stage-bg' : isNext ? 'border-2 border-stage-accent bg-stage-card' : 'border-stage-line bg-stage-card hover:border-stage-muted'} disabled:cursor-not-allowed disabled:border-dashed disabled:opacity-50`}
+        className={`rounded-2xl border px-4 py-3 text-left transition ${wide ? 'min-h-[88px]' : 'min-h-[92px]'} ${isNow ? 'border-accent bg-accent text-navy shadow-glow' : isNext ? 'border-2 border-accent bg-panel' : 'border-line bg-panel hover:border-edge'} disabled:cursor-not-allowed disabled:border-dashed disabled:opacity-50`}
         aria-label={`Pad ${KEY_NAMES[tonic]}, ${label(tonic)}${isNow ? ', sounding now' : isNext ? ', suggested next' : ''}`}
       >
-        <span className="block h-4 font-mono text-[10px]">{isNow ? 'NOW' : isNext ? 'NEXT' : ''}</span>
-        <span className="block font-mono text-2xl font-bold">{KEY_NAMES[tonic]}</span>
-        <span className={`mt-1 block text-xs ${isNow ? '' : 'text-stage-muted'}`}>{missing ? 'no pad yet' : label(tonic)}</span>
+        <span className="block h-4 text-[10px] font-semibold tracking-[0.2em]">{isNow ? 'NOW' : isNext ? 'NEXT' : ''}</span>
+        <span className="block text-2xl font-bold">{KEY_NAMES[tonic]}</span>
+        <span className={`mt-1 block text-xs ${isNow ? '' : 'text-muted'}`}>{missing ? 'no pad yet' : label(tonic)}</span>
       </button>
     );
   };
   const group = (title: string, tonics: number[]) =>
     tonics.length > 0 && (
       <div key={title}>
-        <p className="mb-2 mt-4 text-sm text-stage-muted">{title}</p>
+        <p className="mb-2 mt-4 text-sm text-muted">{title}</p>
         <div className={`grid gap-3 ${tonics.length <= 2 ? 'grid-cols-2' : 'grid-cols-[repeat(auto-fill,minmax(150px,1fr))]'}`}>{tonics.map(tonic => tile(tonic, tonics.length <= 2))}</div>
       </div>
     );
@@ -816,7 +818,7 @@ function PadPanel(props: {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex rounded-lg border border-stage-line p-1" role="radiogroup" aria-label="Pad view">
+        <div className="flex rounded-full border border-line p-1" role="radiogroup" aria-label="Pad view">
           {(
             [
               ['simple', 'Simple', 'app plays it'],
@@ -829,7 +831,7 @@ function PadPanel(props: {
               type="button"
               role="radio"
               aria-checked={mode === value}
-              className={`rounded-md px-4 py-1.5 text-left ${mode === value ? 'border border-stage-muted bg-stage-card' : 'text-stage-muted hover:text-stage-text'}`}
+              className={`rounded-full px-5 py-1.5 text-left ${mode === value ? 'bg-accent-soft text-amber ring-1 ring-inset ring-accent/50' : 'text-muted hover:text-ink'}`}
               onClick={() => onMode(value)}
             >
               <span className="block font-semibold">{title}</span>
@@ -842,9 +844,9 @@ function PadPanel(props: {
 
       <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="font-mono text-xs uppercase tracking-wider text-stage-muted">Now sounding</p>
-          <p className="font-mono text-6xl font-bold">{sounding === null ? '—' : KEY_NAMES[sounding]}</p>
-          <p className="font-mono text-sm text-stage-muted">
+          <p className="caps text-muted">Now sounding</p>
+          <p className="text-6xl font-black text-amber [text-shadow:0_0_28px_rgb(var(--accent)/var(--glow))]">{sounding === null ? '—' : KEY_NAMES[sounding]}</p>
+          <p className="tabular text-sm text-muted">
             {sounding !== null
               ? `Pad in ${KEY_NAMES[sounding]} · ${clock(elapsed)}`
               : have.size === 0
@@ -855,12 +857,12 @@ function PadPanel(props: {
           </p>
         </div>
         {sounding !== null ? (
-          <button type="button" className="rounded-md border border-stage-line px-4 py-2.5 hover:bg-stage-card" onClick={props.onPadOff}>
+          <button type="button" className="rounded-full border border-edge px-4 py-2.5 hover:bg-raised" onClick={props.onPadOff}>
             Turn pad off
           </button>
         ) : (
           opener !== null && (
-            <button type="button" className="rounded-md border border-stage-line px-4 py-2.5 hover:bg-stage-card" onClick={() => onPad(opener)}>
+            <button type="button" className="rounded-full border border-edge px-4 py-2.5 hover:bg-raised" onClick={() => onPad(opener)}>
               Turn pad on ({KEY_NAMES[opener]})
             </button>
           )
@@ -869,10 +871,10 @@ function PadPanel(props: {
 
       {mode === 'simple' ? (
         <div className="mt-6">
-          <p className="mb-3 text-sm text-stage-muted">The app moves along {props.picked ? 'your pads' : 'this way in'}, one pad every 4 bars, then waits on {way.length ? KEY_NAMES[way[way.length - 1]] : (toName ?? fromName)}.</p>
+          <p className="mb-3 text-sm text-muted">The app moves along {props.picked ? 'your pads' : 'this way in'}, one pad every 4 bars, then waits on {way.length ? KEY_NAMES[way[way.length - 1]] : (toName ?? fromName)}.</p>
           <div className="flex flex-wrap items-center gap-3">
             {way.map((tonic, i) => (
-              <span key={`${tonic}-${i}`} className={`rounded-lg border px-5 py-3 font-mono text-2xl font-bold ${tonic === sounding ? 'border-stage-text bg-stage-text text-stage-bg' : 'border-stage-line'}`}>
+              <span key={`${tonic}-${i}`} className={`rounded-full border px-6 py-3 text-2xl font-bold ${tonic === sounding ? 'border-accent bg-accent text-navy shadow-glow' : 'border-line bg-panel'}`}>
                 {KEY_NAMES[tonic]}
               </span>
             ))}
@@ -883,7 +885,7 @@ function PadPanel(props: {
       ) : (
         <div>
           {props.picked && group('Your pads, from Sets', [...new Set(way)])}
-          <p className="mt-6 font-mono text-xs uppercase tracking-wider text-stage-muted">All pads</p>
+          <p className="mt-6 caps text-muted">All pads</p>
           {next ? group('Fits both', groups.both) : null}
           {group(`Fits the song you left, ${fromName}`, next ? groups.from : [...groups.both, ...groups.from])}
           {next && group(`Fits the next song, ${toName}`, groups.to)}
@@ -911,9 +913,9 @@ function BringIn(props: {
   if (!next) {
     return (
       <div>
-        <p className="mb-3 font-mono text-xs uppercase tracking-wider text-stage-muted">End of the set</p>
-        <div className="rounded-lg border border-stage-line p-4">
-          <p className="text-sm text-stage-muted">Play the pad as long as the room needs it, then End set fades it out.</p>
+        <p className="mb-3 caps text-muted">End of the set</p>
+        <div className="rounded-2xl border border-line bg-panel p-4">
+          <p className="text-sm text-muted">Play the pad as long as the room needs it, then End set fades it out.</p>
         </div>
         <Mix prefs={prefs} onPrefs={onPrefs} />
       </div>
@@ -924,15 +926,15 @@ function BringIn(props: {
   const offKey = startKey && snap?.pad && snap.pad.tonic !== startKey.tonic;
   return (
     <div>
-      <p className="mb-3 font-mono text-xs uppercase tracking-wider text-stage-muted">Bring in next song</p>
+      <p className="mb-3 caps text-muted">Bring in next song</p>
       <NextSong next={next} startAt={startAt} onStartAt={props.onStartAt} loaded={props.loaded} onStart={props.onBringIn}>
-        {offKey && <p className="mt-3 rounded-md bg-stage-warn px-3 py-2 text-sm">Not on {start?.key} yet. You can still start whenever you want.</p>}
+        {offKey && <p className="mt-3 rounded-xl bg-accent-soft px-3 py-2 text-sm text-amber">Not on {start?.key} yet. You can still start whenever you want.</p>}
       </NextSong>
-      <button type="button" className="mt-4 flex items-center gap-1.5 px-1 py-1" aria-expanded={props.moreOpen} onClick={props.onMore}>
+      <button type="button" className="mt-4 flex items-center gap-1.5 rounded-full px-2 py-1 text-muted hover:text-ink" aria-expanded={props.moreOpen} onClick={props.onMore}>
         More <ChevronDown className={`h-4 w-4 ${props.moreOpen ? 'rotate-180' : ''}`} />
       </button>
       {props.moreOpen && (
-        <div className="mt-3 space-y-4 border-t border-stage-line pt-4">
+        <div className="mt-3 space-y-4 border-t border-line pt-4">
           <Choice title="Change on">
             {(['beat', 'bar'] as const).map(value => (
               <button key={value} type="button" aria-pressed={prefs.changeOn === value} className={option(prefs.changeOn === value)} onClick={() => onPrefs({ changeOn: value })}>
@@ -979,9 +981,9 @@ function NextSong(props: {
   const views = sectionViews(next);
   const start = views[startAt] ?? views[0];
   return (
-    <div className="rounded-lg border border-stage-line p-4">
+    <div className="rounded-2xl border border-line bg-panel p-4">
       <p className="text-lg font-semibold">{next.title}</p>
-      <p className="font-mono text-xs text-stage-muted">
+      <p className="tabular text-xs text-muted">
         {songBpm(next) ?? '—'} BPM · starts in {start?.key ?? '—'}
       </p>
       {props.children}
@@ -994,7 +996,7 @@ function NextSong(props: {
           ))}
         </Choice>
       </div>
-      <button type="button" disabled={!props.loaded || Boolean(props.waiting)} className="mt-3 w-full rounded-md bg-stage-text px-4 py-3.5 text-lg font-semibold text-stage-bg disabled:opacity-50" onClick={props.onStart}>
+      <button type="button" disabled={!props.loaded || Boolean(props.waiting)} className="mt-3 w-full rounded-full bg-ink text-page px-4 py-3.5 text-lg font-semibold disabled:opacity-50" onClick={props.onStart}>
         {!props.loaded ? 'Loading…' : props.waiting ? `Wait for ${props.waiting} to come in` : `Start ${start?.name ?? 'song'} on next bar`}
       </button>
     </div>
@@ -1004,7 +1006,7 @@ function NextSong(props: {
 function Choice({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="mb-2 font-mono text-xs uppercase tracking-wider text-stage-muted">{title}</p>
+      <p className="mb-2 caps text-muted">{title}</p>
       <div className="flex flex-wrap gap-2">{children}</div>
     </div>
   );
@@ -1013,10 +1015,10 @@ function Choice({ title, children }: { title: string; children: React.ReactNode 
 function Mix({ prefs, onPrefs }: { prefs: Prefs; onPrefs: (patch: Partial<Prefs>) => void }) {
   return (
     <div className="mt-4">
-      <p className="mb-2 font-mono text-xs uppercase tracking-wider text-stage-muted">Mix</p>
+      <p className="mb-2 caps text-muted">Mix</p>
       <label className="block">
         Pad
-        <input type="range" min={0} max={1} step={0.01} value={prefs.padVolume} onChange={event => onPrefs({ padVolume: Number(event.target.value) })} className="mt-2 block w-full accent-[#EE8A4F]" />
+        <input type="range" min={0} max={1} step={0.01} value={prefs.padVolume} onChange={event => onPrefs({ padVolume: Number(event.target.value) })} className="mt-2 block w-full" />
       </label>
     </div>
   );

@@ -30,4 +30,8 @@ npm run e2e   # every screen in headless Chrome, with a fake yt-dlp and generate
 npm run build
 ```
 
-The e2e run saves screenshots to `docs/v2/screens/`. The design is `docs/v2/DJ Worship Wireframes.pdf`, the plan is `docs/v2/PLAN.md`, and the decision log is `docs/v2/decisions.tsv`.
+The e2e run saves screenshots to `docs/v2/screens/`, in whichever mode the system uses. The design is `docs/v2/DJ Worship Wireframes.pdf`, the plan is `docs/v2/PLAN.md`, and the decision log is `docs/v2/decisions.tsv`.
+
+## Brand
+
+The logo, colors, type and light and dark modes all come from the logo file. The rules are in [docs/brand/README.md](docs/brand/README.md).

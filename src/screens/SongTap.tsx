@@ -217,23 +217,23 @@ export function SongTap({ song }: { song: Song }) {
 
       <Card className="px-5 pb-5 pt-4">
         <div className="mb-4 flex items-center gap-5">
-          <Button tone="dark" className="rounded-full px-5" onClick={() => transport.toggle()} disabled={!loaded} aria-label={transport.playing ? 'Pause' : 'Play'}>
+          <Button tone="lantern" className="px-5" onClick={() => transport.toggle()} disabled={!loaded} aria-label={transport.playing ? 'Pause' : 'Play'}>
             {transport.playing ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
             {transport.playing ? 'Pause' : 'Play'}
           </Button>
-          <p className="font-mono text-xl tabular" aria-live="off">
+          <p className="tabular text-xl font-medium" aria-live="off">
             {clock(pos)}
             {at && at.bar > 0 ? ` · bar ${at.bar} · beat ${at.beat}` : ''}
           </p>
           <div className="ml-auto flex items-center gap-1">
-            <div className="mr-2 inline-flex rounded-md border border-line p-0.5" role="group" aria-label="Section tool">
+            <div className="mr-2 inline-flex rounded-full border border-line p-1" role="group" aria-label="Section tool">
               {TOOLS.map(([value, label, Icon, key, help]) => (
                 <button
                   key={value}
                   type="button"
                   aria-pressed={tool === value}
                   title={`${help} (${key})`}
-                  className={`inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-sm ${tool === value ? 'bg-ink text-white' : 'hover:bg-paper'}`}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${tool === value ? 'bg-accent-soft text-amber ring-1 ring-inset ring-accent/50' : 'text-muted hover:bg-raised hover:text-ink'}`}
                   onClick={() => pickTool(value)}
                 >
                   <Icon className="h-4 w-4" aria-hidden />
@@ -243,7 +243,7 @@ export function SongTap({ song }: { song: Song }) {
             </div>
             <button
               type="button"
-              className="inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 hover:bg-paper disabled:text-faint disabled:hover:bg-transparent"
+              className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 hover:bg-raised disabled:text-faint disabled:hover:bg-transparent"
               onClick={undo}
               disabled={history.current.length === 0}
               title="Undo the last change (Backspace)"
@@ -269,7 +269,7 @@ export function SongTap({ song }: { song: Song }) {
               </MenuItem>
             </Menu>
             <Menu label="More">
-              <p className="px-3 pb-1 pt-2 font-mono text-xs uppercase tracking-wider text-muted">Meter</p>
+              <p className="px-3 pb-1 pt-2 caps text-muted">Meter</p>
               {[3, 4, 6].map(count => (
                 <MenuItem key={count} onClick={() => save({ ...latest.current, beatsPerBar: count })}>
                   {song.beatsPerBar === count ? '✓ ' : ''}
@@ -313,23 +313,23 @@ export function SongTap({ song }: { song: Song }) {
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,354px)_minmax(0,1fr)]">
         <Card className="self-start p-5">
-          <h2 className="mb-4 text-xl font-bold">1 · Tap the beat</h2>
+          <h2 className="mb-4 text-xl font-bold"><span className="text-amber">1</span> · Tap the beat</h2>
           <button
             type="button"
-            className={`w-full rounded-lg border-2 border-ink px-3 py-7 text-center transition-colors ${flash ? 'bg-accent-soft' : 'bg-white hover:bg-paper'}`}
+            className={`w-full rounded-2xl border-2 px-3 py-7 text-center transition ${flash ? 'border-accent bg-accent-soft shadow-glow' : 'border-accent/40 bg-well hover:border-accent/70'}`}
             onClick={event => tap(event.shiftKey, event.timeStamp)}
             disabled={!loaded}
           >
-            <span className="block font-mono text-4xl font-bold tracking-wide">TAP</span>
+            <span className="block pl-[0.3em] text-4xl font-black tracking-[0.3em] text-amber">TAP</span>
             <span className="mt-3 block whitespace-nowrap text-[13px] text-muted">Space on every beat · Shift+Space on beat 1</span>
           </button>
           {retap && (
-            <p className="mt-3 text-sm text-accent" aria-live="polite">
+            <p className="mt-3 text-sm text-amber" aria-live="polite">
               Re-tapping {retap.label}. New taps replace the old ones as you go. <LinkButton onClick={() => transport.pause()}>Stop</LinkButton>
             </p>
           )}
           <p className="mt-6 text-sm text-muted">Tempo</p>
-          <p className="font-mono text-2xl" aria-live="polite">
+          <p className="tabular text-2xl font-bold" aria-live="polite">
             {bpm ? `${bpm.toFixed(1)} BPM` : '—'}
           </p>
           <Button
@@ -353,19 +353,19 @@ export function SongTap({ song }: { song: Song }) {
 
         <Card className="p-5">
           <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-            <h2 className="text-xl font-bold">2 · Mark sections</h2>
+            <h2 className="text-xl font-bold"><span className="text-amber">2</span> · Mark sections</h2>
             <p className="text-sm text-muted">Press a label (or 1–8) while it plays. It starts at the nearest bar.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {SECTION_TYPES.map((item, i) => (
               <Button key={item.type} className="px-3.5" onClick={() => mark(item.type)}>
-                <span className="font-mono text-xs text-muted">{i + 1}</span>
+                <span className="text-xs font-bold text-amber">{i + 1}</span>
                 {item.label}
               </Button>
             ))}
             {custom === null ? (
               <Button className="px-3.5" onClick={() => setCustom('')}>
-                <span className="font-mono text-xs text-muted">+</span>
+                <span className="text-xs font-bold text-amber">+</span>
                 Custom
               </Button>
             ) : (
@@ -377,21 +377,21 @@ export function SongTap({ song }: { song: Song }) {
                   setCustom(null);
                 }}
               >
-                <input autoFocus value={custom} onChange={event => setCustom(event.target.value)} placeholder="Name, then Enter" aria-label="Custom section name" className="rounded-md border border-ink px-3" />
-                <Button type="submit" tone="dark">
+                <input autoFocus value={custom} onChange={event => setCustom(event.target.value)} placeholder="Name, then Enter" aria-label="Custom section name" className="rounded-full border border-edge bg-well px-4" />
+                <Button type="submit" tone="lantern">
                   Mark
                 </Button>
               </form>
             )}
           </div>
-          {hint && <p className="mt-3 text-sm text-accent">{hint}</p>}
+          {hint && <p className="mt-3 text-sm text-amber">{hint}</p>}
 
           <table className="mt-6 w-full text-left">
             <thead>
-              <tr className="border-b border-line font-mono text-xs uppercase tracking-wider text-muted">
-                <th className="py-2 font-normal">Section</th>
-                <th className="py-2 font-normal">Key (found by the app)</th>
-                <th className="w-44 py-2 font-normal">
+              <tr className="caps border-b border-line text-muted">
+                <th className="py-2">Section</th>
+                <th className="py-2">Key (found by the app)</th>
+                <th className="w-44 py-2">
                   <span className="sr-only">Adjust</span>
                 </th>
               </tr>
@@ -403,7 +403,7 @@ export function SongTap({ song }: { song: Song }) {
               {rest && (
                 <tr className="border-b border-line text-muted">
                   <td className="py-2">[next mark]</td>
-                  <td className="py-2 font-mono text-ink">
+                  <td className="py-2 tabular text-ink">
                     {rest.key ?? '—'}
                     {rest.change ? ' · key change found' : ''}
                   </td>
@@ -452,7 +452,7 @@ function TypeSelect({ song, view, save }: Edit) {
       value={view.section.type}
       onChange={event => setType(event.target.value as SectionType)}
       title="Change the label"
-      className="-ml-1 cursor-pointer appearance-none rounded bg-transparent px-1 py-0.5 font-medium [field-sizing:content] hover:bg-paper"
+      className="-ml-1 cursor-pointer appearance-none rounded-md bg-transparent px-1 py-0.5 font-semibold [field-sizing:content] hover:bg-raised"
     >
       {SECTION_TYPES.map(item => (
         <option key={item.type} value={item.type}>
@@ -473,7 +473,7 @@ function KeySelect({ song, view, save }: Edit) {
       value={view.section.key ?? ''}
       onChange={event => save(patched(song, view, { key: event.target.value || undefined }))}
       title="Change the key"
-      className="-ml-1 cursor-pointer appearance-none rounded bg-transparent px-1 py-0.5 font-mono hover:bg-paper"
+      className="-ml-1 cursor-pointer appearance-none rounded-md bg-transparent px-1 py-0.5 font-medium hover:bg-raised"
     >
       <option value="">{found ?? '—'}</option>
       {KEY_NAMES.flatMap(name => [name, `${name}m`]).map(name => (
@@ -489,18 +489,18 @@ function KeySelect({ song, view, save }: Edit) {
 function SectionInspector({ song, view, save, loaded, onRetap, onClose }: Edit & { loaded: boolean; onRetap: () => void; onClose: () => void }) {
   const center = ((view.start + view.end) / 2 / (song.duration || 1)) * 100;
   const { pickupBeats } = view.section;
-  const icon = 'rounded p-1 text-muted hover:bg-paper hover:text-ink';
-  const action = 'inline-flex items-center gap-1.5 rounded px-2 py-1 hover:bg-paper disabled:text-faint';
+  const icon = 'rounded-full p-1 text-muted hover:bg-raised hover:text-ink';
+  const action = 'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 hover:bg-raised disabled:text-faint';
   return (
     <div
       role="dialog"
       aria-label={`${view.name} settings`}
-      className="absolute top-full z-20 mt-2 w-80 rounded-md border border-line bg-white p-4 shadow-lg"
+      className="absolute top-full z-20 mt-2 w-80 rounded-2xl border border-edge bg-panel p-4 shadow-2xl shadow-navy/15 dark:shadow-black/60"
       style={{ left: `clamp(0px, calc(${center}% - 10rem), calc(100% - 20rem))` }}
     >
       <div className="mb-3 flex items-center gap-2">
         <TypeSelect song={song} view={view} save={save} />
-        <span className="font-mono text-xs text-muted">
+        <span className="tabular text-xs text-muted">
           bars {view.s + 1}–{view.e}
         </span>
         <button type="button" className={`ml-auto ${icon}`} aria-label="Close" onClick={onClose}>
@@ -509,7 +509,7 @@ function SectionInspector({ song, view, save, loaded, onRetap, onClose }: Edit &
       </div>
       <div className="grid grid-cols-[auto_1fr] items-center gap-x-4 gap-y-3 text-sm">
         <span className="text-muted">Starts on</span>
-        <div className="flex items-center gap-1 font-mono">
+        <div className="flex items-center gap-1 tabular">
           <button type="button" className={icon} aria-label={`Move ${view.name} a bar earlier`} onClick={() => save(moveSection(song, view.section.id, -1))}>
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -554,7 +554,7 @@ function SectionInspector({ song, view, save, loaded, onRetap, onClose }: Edit &
         </button>
         <button
           type="button"
-          className={`ml-auto text-accent ${action}`}
+          className={`ml-auto text-danger ${action}`}
           title="Its bars join the section before it"
           onClick={() => save({ ...song, sections: song.sections.filter(item => item.id !== view.section.id) })}
         >
@@ -567,10 +567,10 @@ function SectionInspector({ song, view, save, loaded, onRetap, onClose }: Edit &
 
 function SectionRow({ song, view, save, loaded, selected, onRetap }: Edit & { loaded: boolean; selected: boolean; onRetap: () => void }) {
   return (
-    <tr className={`border-b border-line ${selected ? 'bg-accent-soft' : ''}`}>
+    <tr className={`border-b border-line ${selected ? 'bg-accent-soft shadow-[inset_3px_0_0_rgb(var(--accent))]' : ''}`}>
       <td className="py-2">
         <TypeSelect song={song} view={view} save={save} />
-        <span className="ml-2 font-mono text-xs text-muted">
+        <span className="ml-2 tabular text-xs text-muted">
           bars {view.s + 1}–{view.e}
         </span>
       </td>
@@ -581,7 +581,7 @@ function SectionRow({ song, view, save, loaded, selected, onRetap }: Edit & { lo
         <div className="flex items-center justify-end text-muted">
           <button
             type="button"
-            className="rounded p-1 hover:bg-paper hover:text-ink"
+            className="rounded-full p-1.5 hover:bg-raised hover:text-ink"
             aria-label={`Play ${view.name}`}
             disabled={!loaded}
             onClick={() => {
@@ -591,15 +591,15 @@ function SectionRow({ song, view, save, loaded, selected, onRetap }: Edit & { lo
           >
             <Play className="h-4 w-4" />
           </button>
-          <button type="button" className="rounded p-1 hover:bg-paper hover:text-ink" aria-label={`Move ${view.name} a bar earlier`} onClick={() => save(moveSection(song, view.section.id, -1))}>
+          <button type="button" className="rounded-full p-1.5 hover:bg-raised hover:text-ink" aria-label={`Move ${view.name} a bar earlier`} onClick={() => save(moveSection(song, view.section.id, -1))}>
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <button type="button" className="rounded p-1 hover:bg-paper hover:text-ink" aria-label={`Move ${view.name} a bar later`} onClick={() => save(moveSection(song, view.section.id, 1))}>
+          <button type="button" className="rounded-full p-1.5 hover:bg-raised hover:text-ink" aria-label={`Move ${view.name} a bar later`} onClick={() => save(moveSection(song, view.section.id, 1))}>
             <ChevronRight className="h-4 w-4" />
           </button>
           <button
             type="button"
-            className="rounded px-2 py-1 text-sm hover:bg-paper hover:text-ink"
+            className="whitespace-nowrap rounded-full px-2.5 py-1 text-sm hover:bg-raised hover:text-ink"
             aria-label={`Re-tap ${view.name}`}
             title="Play this section and tap it again"
             disabled={!loaded}
@@ -609,7 +609,7 @@ function SectionRow({ song, view, save, loaded, selected, onRetap }: Edit & { lo
           </button>
           <button
             type="button"
-            className="rounded p-1 hover:bg-paper hover:text-ink"
+            className="rounded-full p-1.5 hover:bg-raised hover:text-ink"
             aria-label={`Remove ${view.name}`}
             onClick={() => save({ ...song, sections: song.sections.filter(item => item.id !== view.section.id) })}
           >
@@ -666,7 +666,8 @@ function Track({
     () =>
       grid.beats.map((t, i) => ({
         x: (t / duration) * 1000,
-        color: !grid.tapped[i] ? '#D4D4CE' : grid.beatInBar[i] === 1 ? '#C2410C' : '#1C1C1A',
+        // Beats the app placed stay dim; tapped beats light up, and beat 1 glows amber.
+        tone: !grid.tapped[i] ? 'stroke-edge' : grid.beatInBar[i] === 1 ? 'stroke-accent' : 'stroke-muted',
         tall: grid.beatInBar[i] === 1,
       })),
     [grid, duration],
@@ -680,7 +681,7 @@ function Track({
 
   return (
     <div>
-      <div className="relative mb-1 h-4 font-mono text-[11px] text-muted" aria-hidden>
+      <div className="relative mb-1 h-4 tabular text-[11px] text-muted" aria-hidden>
         {rulers.map(ruler => (
           <span key={ruler.bar} className="absolute -translate-x-1/2 first:translate-x-0" style={{ left: `${(ruler.t / duration) * 100}%` }}>
             {ruler.bar === 1 ? 'bar 1' : ruler.bar}
@@ -706,14 +707,14 @@ function Track({
             if (event.currentTarget.hasPointerCapture(event.pointerId)) seekAt(event);
           }}
         >
-          <svg viewBox={`0 0 ${BARS * 6} 120`} preserveAspectRatio="none" className="block h-[120px] w-full bg-wave-bg">
+          <svg viewBox={`0 0 ${BARS * 6} 120`} preserveAspectRatio="none" className="block h-[120px] w-full rounded-xl bg-wave-bg">
             {bars.map((peak, i) => (
-              <rect key={i} x={i * 6 + 1} width={4} y={60 - peak * 56} height={peak * 112} fill={i / BARS < played ? '#1C1C1A' : '#A6A6A0'} />
+              <rect key={i} x={i * 6 + 1} width={4} y={60 - peak * 56} height={peak * 112} rx={2} className={i / BARS < played ? 'fill-accent' : 'fill-wave-rest'} />
             ))}
           </svg>
           <svg viewBox="0 0 1000 14" preserveAspectRatio="none" className="mt-1 block h-3.5 w-full" aria-hidden>
             {ticks.map((tick, i) => (
-              <line key={i} x1={tick.x} x2={tick.x} y1={tick.tall ? 0 : 4} y2={14} stroke={tick.color} strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
+              <line key={i} x1={tick.x} x2={tick.x} y1={tick.tall ? 0 : 4} y2={14} className={tick.tone} strokeWidth={2.4} vectorEffect="non-scaling-stroke" />
             ))}
           </svg>
         </div>
@@ -732,13 +733,13 @@ function Track({
                   ? 'cursor-crosshair'
                   : 'cursor-not-allowed'
                 : selected
-                  ? 'ring-2 ring-inset ring-accent'
-                  : 'hover:ring-2 hover:ring-inset hover:ring-accent/60';
+                  ? 'z-10 ring-2 ring-accent ring-offset-2 ring-offset-panel'
+                  : 'hover:brightness-125';
             return (
               <button
                 key={view.section.id}
                 type="button"
-                className={`absolute inset-y-0 flex items-center justify-center overflow-hidden border-r-2 border-white font-mono text-xs ${shadeClass(view)} ${pointer}`}
+                className={`absolute inset-y-0 flex items-center justify-center overflow-hidden rounded-md border-r-2 border-panel text-xs font-semibold ${shadeClass(view)} ${pointer}`}
                 style={{ left: `${(view.start / duration) * 100}%`, width: `${width}%` }}
                 title={`${view.name} · bars ${view.s + 1}–${view.e}`}
                 aria-label={`${view.name}, bars ${view.s + 1}–${view.e}`}
@@ -757,7 +758,7 @@ function Track({
               return (
                 <div
                   key={`pickup-${view.section.id}`}
-                  className="pointer-events-none absolute top-0 h-1.5 bg-accent"
+                  className="pointer-events-none absolute top-0 z-10 h-1.5 rounded-full bg-accent ring-1 ring-page"
                   style={{ left: `${(from / duration) * 100}%`, width: `${((view.start - from) / duration) * 100}%` }}
                   data-pickup={view.name}
                   aria-hidden
@@ -766,7 +767,7 @@ function Track({
             })}
           {restStart !== null && (
             <div
-              className={`hatch absolute inset-y-0 flex items-center justify-center border border-dashed border-faint font-mono text-xs text-muted ${tool === 'cut' ? 'cursor-not-allowed' : ''}`}
+              className={`hatch absolute inset-y-0 flex items-center justify-center rounded-md border border-dashed border-faint text-xs text-muted ${tool === 'cut' ? 'cursor-not-allowed' : ''}`}
               style={{ left: `${(restStart / duration) * 100}%`, right: 0 }}
               onClick={() => onSelect(null)}
             >
@@ -781,13 +782,13 @@ function Track({
             data-cut-bar={cut.bar + 1}
             aria-hidden
           >
-            <span className="absolute left-1 top-1 flex items-center gap-1 whitespace-nowrap rounded bg-accent px-1.5 py-0.5 font-mono text-[11px] text-white">
+            <span className="absolute left-1 top-1 flex items-center gap-1 whitespace-nowrap rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-navy">
               <Scissors className="h-3 w-3" />
               bar {cut.bar + 1}
             </span>
           </div>
         )}
-        <div className="pointer-events-none absolute -top-1 bottom-0 w-0.5 bg-accent" style={{ left: `${played * 100}%` }} aria-hidden />
+        <div className="pointer-events-none absolute -top-1 bottom-0 z-20 w-0.5 bg-ink" style={{ left: `${played * 100}%` }} aria-hidden />
       </div>
     </div>
   );

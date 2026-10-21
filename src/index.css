@@ -2,25 +2,165 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Self-hosted so Perform keeps its type with no network. */
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./fonts/montserrat-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Montserrat';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./fonts/montserrat-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212,
+    U+2215, U+FEFF, U+FFFD;
+}
+
+/* Light: a page lit by the lamp. Navy ink, cream paper, amber for what to do next. */
+:root {
+  color-scheme: light;
+  --page: 251 247 241;
+  --panel: 255 255 255;
+  --raised: 243 236 225;
+  --well: 255 253 249;
+  --lantern: 16 40 58;
+  --line: 231 221 205;
+  --edge: 183 170 150;
+  --ink: 16 40 58;
+  --muted: 93 107 119;
+  --faint: 133 137 140;
+  --accent: 232 162 78;
+  --accent-hover: 240 178 98;
+  --amber: 148 87 15;
+  --danger: 180 67 43;
+  --side: 246 236 221;
+  --shade-light: 237 227 211;
+  --shade-mid: 207 216 224;
+  --shade-dark: 70 97 122;
+  --shade-black: 16 40 58;
+  --on-shade-light: 16 40 58;
+  --on-shade-mid: 16 40 58;
+  --on-shade-dark: 246 236 221;
+  --on-shade-black: 246 236 221;
+  --wave-bg: 247 241 231;
+  --wave-rest: 201 207 212;
+  --glow: 0.3;
+  --sky: radial-gradient(120% 70% at 60% -10%, #fffaf1 0%, rgb(var(--page)) 60%);
+}
+
+/* Dark: the lantern at night. Cream ink, midnight navy, the same amber glowing. */
+.dark {
+  color-scheme: dark;
+  --page: 7 13 19;
+  --panel: 13 24 34;
+  --raised: 21 38 58;
+  --well: 8 17 26;
+  --lantern: 28 51 72;
+  --line: 30 50 67;
+  --edge: 58 88 115;
+  --ink: 246 236 221;
+  --muted: 151 169 185;
+  --faint: 103 125 144;
+  --accent: 240 166 75;
+  --accent-hover: 255 199 119;
+  --amber: 245 179 94;
+  --danger: 242 137 108;
+  --side: 18 22 25;
+  --shade-light: 21 39 57;
+  --shade-mid: 36 66 92;
+  --shade-dark: 122 83 43;
+  --shade-black: 235 203 151;
+  --on-shade-light: 246 236 221;
+  --on-shade-mid: 246 236 221;
+  --on-shade-dark: 246 236 221;
+  --on-shade-black: 16 40 58;
+  --wave-bg: 9 18 26;
+  --wave-rest: 52 80 106;
+  --glow: 0.45;
+  --sky: radial-gradient(120% 70% at 60% -10%, #11253a 0%, rgb(var(--page)) 55%, #040709 100%);
+}
+
 html,
 body,
 #root {
   height: 100%;
 }
 
+html {
+  scrollbar-color: rgb(var(--edge)) transparent;
+}
+
 body {
-  @apply bg-paper font-sans text-ink antialiased;
+  @apply bg-page font-sans text-ink antialiased;
+  background-image: var(--sky);
+  background-attachment: fixed;
+}
+
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  accent-color: rgb(var(--accent));
+}
+
+input::placeholder {
+  color: rgb(var(--muted));
+}
+
+input,
+select,
+textarea {
+  caret-color: rgb(var(--amber));
+}
+
+option {
+  background: rgb(var(--panel));
+}
+
+::selection {
+  background: rgb(var(--accent) / 0.35);
 }
 
 :focus-visible {
-  outline: 2px solid #c2410c;
+  outline: 2px solid rgb(var(--amber));
   outline-offset: 2px;
 }
 
+/* Small spaced capitals, after the thin CIRCLE in the wordmark. */
+@layer components {
+  .caps {
+    @apply text-[11px] font-semibold uppercase tracking-[0.2em];
+  }
+}
+
 .hatch {
-  background: repeating-linear-gradient(135deg, #e4e4df 0 4px, #f4f4f1 4px 8px);
+  background: repeating-linear-gradient(135deg, rgb(var(--raised)) 0 4px, rgb(var(--well)) 4px 8px);
 }
 
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* The resting sound bars' slow breath. */
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(1.35);
+  }
+}
+.breathe {
+  animation: breathe 3.2s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .breathe {
+    animation: none;
+  }
 }

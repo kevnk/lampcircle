@@ -3,10 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DJW · Lampcircle</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+    <title>Lampcircle</title>
+    <meta name="description" content="Live song maps for leading worship in a small room." />
+    <meta name="theme-color" content="#FBF7F1" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <script>
+      // Dark before the first paint, so a dark room never sees a light flash. src/theme.ts keeps it in step.
+      let saved = null;
+      try {
+        saved = localStorage.getItem('lampcircle.theme');
+      } catch {}
+      if (saved === 'dark' || (saved !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)) {
+        document.documentElement.classList.add('dark');
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', '#070D13');
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

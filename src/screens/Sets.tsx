@@ -2,7 +2,7 @@ import { useMemo, useState, type KeyboardEvent } from 'react';
 import { Menu as Handle, X } from 'lucide-react';
 import type { Song, WorshipSet } from '../types';
 import { go, useStore } from '../store';
-import { Button, Card, LinkButton, Menu, MenuItem } from '../ui';
+import { Button, Card, LinkButton, Menu, MenuItem, RestingBars } from '../ui';
 import { KEY_NAMES, padFit, padGroups, route, tempoNote } from '../lib/music';
 import { bpmOf, isReady, keyOf, keysText, planSeconds, planText, songGrid, songKeys } from '../lib/songMap';
 
@@ -56,8 +56,9 @@ export function Sets({ id }: { id?: string }) {
   if (!set) {
     return (
       <div>
-        <h1 className="mb-6 text-4xl font-bold tracking-tight">Sets</h1>
+        <h1 className="mb-6 text-4xl font-extrabold tracking-tight">Sets</h1>
         <Card className="p-6">
+          <RestingBars className="mb-4" />
           <p className="mb-4">No sets yet. A set is the songs for one gathering, in order, with a live pad between each.</p>
           <Button tone="primary" onClick={() => go({ page: 'sets', id: store.newSet().id })}>
             New set
@@ -95,7 +96,7 @@ export function Sets({ id }: { id?: string }) {
             aria-label="Set name"
             value={set.name}
             onChange={event => update({ name: event.target.value })}
-            className="-ml-1 w-full max-w-xl rounded bg-transparent px-1 text-4xl font-bold tracking-tight hover:bg-white/60 focus:bg-white"
+            className="-ml-1 w-full max-w-xl rounded-xl bg-transparent px-1 text-4xl font-extrabold tracking-tight hover:bg-raised focus:bg-raised"
           />
           <p className="mt-1 text-muted">
             {items.length} song{items.length === 1 ? '' : 's'} · {items.length} pad{items.length === 1 ? '' : 's'} · about {minutes} min if played as planned
@@ -103,7 +104,7 @@ export function Sets({ id }: { id?: string }) {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {sets.length > 1 && (
-            <select aria-label="Switch set" value={set.id} onChange={event => go({ page: 'sets', id: event.target.value })} className="rounded-md border border-line bg-white px-2 py-2.5">
+            <select aria-label="Switch set" value={set.id} onChange={event => go({ page: 'sets', id: event.target.value })} className="rounded-full border border-edge bg-panel px-3 py-2.5">
               {sets.map(item => (
                 <option key={item.id} value={item.id}>
                   {item.name}
@@ -137,7 +138,7 @@ export function Sets({ id }: { id?: string }) {
         </div>
       </header>
       {unready.length > 0 && (
-        <p className="mb-4 rounded-md border border-line bg-white px-4 py-3 text-sm">
+        <p className="mb-4 rounded-xl border border-accent/30 bg-accent-soft px-4 py-3 text-sm">
           {unready.map(song => song.title).join(', ')} still {unready.length === 1 ? 'needs' : 'need'} work before Perform.{' '}
           <LinkButton className="text-sm" onClick={() => go({ page: 'song', id: unready[0].id, step: 'export' })}>
             See what is left
@@ -150,7 +151,7 @@ export function Sets({ id }: { id?: string }) {
           <h2 className="text-lg font-bold">Ready songs</h2>
           <label className="mt-2 block text-sm text-muted">
             Search ready songs
-            <input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Title, key or BPM" className="mt-1 w-full rounded-md border border-faint px-3 py-2 text-ink placeholder:text-faint" />
+            <input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Title, key or BPM" className="mt-1 w-full rounded-full border border-faint bg-well px-4 py-2 text-ink" />
           </label>
           <ul className="mt-2">
             {ready.map(song => {
@@ -159,7 +160,7 @@ export function Sets({ id }: { id?: string }) {
                 <li key={song.id} className="flex items-center justify-between gap-2 border-t border-line py-3 first:border-0">
                   <div className="min-w-0">
                     <p className="truncate font-medium">{song.title}</p>
-                    <p className="font-mono text-xs text-muted">
+                    <p className="tabular text-xs text-muted">
                       {songBpm(song) ?? '—'} · {keysText(songKeys(song))}
                     </p>
                   </div>
@@ -174,7 +175,12 @@ export function Sets({ id }: { id?: string }) {
         </Card>
 
         <ol className="w-full min-w-0 flex-1">
-          {items.length === 0 && <li className="rounded-md border border-dashed border-faint p-6 text-muted">Add ready songs from the left. They play in this order.</li>}
+          {items.length === 0 && (
+            <li className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-edge p-8 text-center text-muted">
+              <RestingBars />
+              Add ready songs from the left. They play in this order.
+            </li>
+          )}
           {items.map((song, i) => {
             const pad = livePad(song, items[i + 1]);
             const way = wayIn(set, song, items[i + 1]);
@@ -190,7 +196,7 @@ export function Sets({ id }: { id?: string }) {
                 }}
               >
                 <div
-                  className={`flex items-start gap-4 rounded-md border border-line bg-white px-4 py-3.5 ${dragging === i ? 'opacity-50' : ''}`}
+                  className={`flex items-start gap-4 rounded-2xl border border-line bg-panel px-4 py-3.5 ${dragging === i ? 'opacity-50' : ''}`}
                   draggable
                   onDragStart={() => setDragging(i)}
                   onDragEnd={() => setDragging(null)}
@@ -206,35 +212,35 @@ export function Sets({ id }: { id?: string }) {
                   >
                     <Handle className="h-5 w-5" />
                   </button>
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink font-medium text-white">{i + 1}</span>
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-accent font-bold text-amber shadow-glow-sm">{i + 1}</span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline justify-between gap-x-4">
-                      <p className="text-lg font-bold">{song.title}</p>
-                      <p className="font-mono text-sm">
+                      <p className="text-lg font-bold tracking-tight">{song.title}</p>
+                      <p className="tabular text-sm text-muted">
                         {bpm ? `${bpm} BPM` : '—'} · {keysText(songKeys(song))}
                       </p>
                     </div>
                     <p className="mt-0.5 text-muted">
-                      Plan: <span className="font-mono text-ink">{planText(song) || '—'}</span>
+                      Plan: <span className="tabular font-medium text-ink">{planText(song) || '—'}</span>
                     </p>
                   </div>
-                  <button type="button" className="mt-1 rounded p-1 text-faint hover:bg-paper hover:text-ink" aria-label={`Remove ${song.title} from the set`} onClick={() => update({ songIds: set.songIds.filter(songId => songId !== song.id) })}>
+                  <button type="button" className="mt-1 rounded-full p-1 text-faint hover:bg-raised hover:text-danger" aria-label={`Remove ${song.title} from the set`} onClick={() => update({ songIds: set.songIds.filter(songId => songId !== song.id) })}>
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="ml-[3.9rem] border-l-2 border-faint py-2.5 pl-6">
-                  <div className="rounded-md border border-dashed border-faint bg-[#F2F2EE] px-4 py-3">
+                <div className="ml-[3.9rem] border-l-2 border-dashed border-accent/40 py-2.5 pl-6">
+                  <div className="rounded-2xl border border-dashed border-accent/40 bg-accent/[0.06] px-4 py-3">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                      <span className="font-mono text-xs uppercase tracking-wider text-muted">Live pad</span>
-                      <span className="font-mono text-lg font-bold">
-                        {pad.from} → {pad.to}
+                      <span className="caps text-amber">Live pad</span>
+                      <span className="tabular text-lg font-bold">
+                        {pad.from} <span className="text-amber">→</span> {pad.to}
                       </span>
                       <span className="text-sm text-muted">{way.picked ? 'your pads' : 'way in'}</span>
                       {way.tonics.map((tonic, k) => (
                         <span
                           key={`${tonic}-${k}`}
                           title={have.has(tonic) ? undefined : 'No pad in this key yet. Perform skips it.'}
-                          className={`rounded border bg-white px-1.5 py-0.5 font-mono text-xs ${have.has(tonic) ? 'border-faint' : 'border-dashed border-faint text-faint'}`}
+                          className={`rounded-full border bg-well px-2 py-0.5 text-xs font-semibold ${have.has(tonic) ? 'border-accent/50 text-amber' : 'border-dashed border-faint text-faint'}`}
                         >
                           {KEY_NAMES[tonic]}
                         </span>
@@ -257,7 +263,7 @@ export function Sets({ id }: { id?: string }) {
                     </div>
                     {pad.note && (
                       <div className="mt-2 flex flex-wrap items-center gap-3">
-                        <span className="rounded bg-accent-soft px-2 py-1 text-sm text-accent">{pad.note}</span>
+                        <span className="rounded-full bg-accent-soft px-3 py-1 text-sm text-amber">{pad.note}</span>
                         <LinkButton onClick={() => go({ page: 'perform', setId: set.id, item: 2 * i + 1 })}>Practice</LinkButton>
                       </div>
                     )}
@@ -280,14 +286,14 @@ function PadPicker(props: { song: Song; next: Song | undefined; way: { tonics: n
   const to = props.next ? keyOf(songKeys(props.next)?.start) : null;
   const groups = padGroups(from, to);
   return (
-    <div className="mt-3 border-t border-faint pt-3">
+    <div className="mt-3 border-t border-accent/20 pt-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm text-muted">Plays</span>
         {way.tonics.map((tonic, k) => (
-          <span key={`${tonic}-${k}`} className="inline-flex items-center gap-1 rounded border border-ink bg-white py-0.5 pl-2 pr-1 font-mono text-sm">
+          <span key={`${tonic}-${k}`} className="inline-flex items-center gap-1 rounded-full border border-accent/60 bg-well py-0.5 pl-2.5 pr-1 text-sm font-semibold text-amber">
             {KEY_NAMES[tonic]}
             {way.tonics.length > 1 && (
-              <button type="button" className="rounded p-0.5 text-faint hover:bg-paper hover:text-ink" aria-label={`Take out pad ${k + 1}, ${KEY_NAMES[tonic]}`} onClick={() => onPick(way.tonics.filter((_, j) => j !== k))}>
+              <button type="button" className="rounded-full p-0.5 text-faint hover:bg-raised hover:text-ink" aria-label={`Take out pad ${k + 1}, ${KEY_NAMES[tonic]}`} onClick={() => onPick(way.tonics.filter((_, j) => j !== k))}>
                 <X className="h-3.5 w-3.5" />
               </button>
             )}
@@ -307,10 +313,10 @@ function PadPicker(props: { song: Song; next: Song | undefined; way: { tonics: n
             type="button"
             disabled={!have.has(tonic)}
             aria-label={`Add pad ${KEY_NAMES[tonic]}, ${padFit(tonic, from, to)}`}
-            className="rounded-md border border-line bg-white px-3 py-2 text-left hover:border-ink disabled:cursor-not-allowed disabled:border-dashed disabled:opacity-50"
+            className="rounded-xl border border-line bg-panel px-3 py-2 text-left hover:border-accent/60 disabled:cursor-not-allowed disabled:border-dashed disabled:opacity-50"
             onClick={() => onPick([...way.tonics, tonic])}
           >
-            <span className="block font-mono text-lg font-bold">{KEY_NAMES[tonic]}</span>
+            <span className="block text-lg font-bold">{KEY_NAMES[tonic]}</span>
             <span className="block text-xs text-muted">{have.has(tonic) ? padFit(tonic, from, to) : 'no pad yet'}</span>
           </button>
         ))}
