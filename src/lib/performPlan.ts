@@ -49,18 +49,24 @@ export function nextBoundary(rule: JumpAt, earliest: number, view: SectionView, 
 /** How a jump between two different sections lines up its fades. Loops and holds always use the section's own seam. */
 export type JumpFade = 'out' | 'in' | 'edited';
 
+/** Seconds from the landing (negative is before it) where the old pass fades out and the new one fades in. */
+export interface SeamFades {
+  out: [number, number];
+  in: [number, number];
+}
+
 /**
- * Seconds from the landing (negative is before it) where the old pass fades out and the new one fades in.
  * Null when the recording runs straight on into the next section: the same audio keeps playing with no fades.
  * Between different sections, `match` lines one fade up with the other, so seams edited for looping leave no gap.
+ * `other` is the grid of another song the jump goes to: that never runs straight on, and is never a loop.
  */
-export function seamFades(from: SectionView, to: SectionView, boundary: number, grid: Grid, match: JumpFade): { out: [number, number]; in: [number, number] } | null {
-  if (to.index === from.index + 1 && Math.abs(boundary - to.start) < 1e-3) return null;
+export function seamFades(from: SectionView, to: SectionView, boundary: number, grid: Grid, match: JumpFade, other?: Grid): SeamFades | null {
+  if (!other && to.index === from.index + 1 && Math.abs(boundary - to.start) < 1e-3) return null;
   const fade = fadeOutSpan(from, grid, boundary);
-  const lead = leadIn(to, grid);
+  const lead = leadIn(to, other ?? grid);
   const out: [number, number] = [fade.start - boundary, fade.end - boundary];
   const into: [number, number] = [lead.audioStart - to.start, lead.singerStart - to.start];
-  if (from.index === to.index || match === 'edited') return { out, in: into };
+  if ((!other && from.index === to.index) || match === 'edited') return { out, in: into };
   if (match === 'in') return { out: into, in: into };
   // The new pass cannot start before its recording does.
   const start = Math.max(out[0], -to.start);

@@ -194,6 +194,11 @@ same('matching the fade-in takes the old section out over it', seam(chorus4, 'in
 same('a loop keeps its own seam whatever the jump setting', plan.seamFades(chorus2, chorus2, 14, steady, 'out'), { out: [-2.5, -1.5], in: [-2.5, -1.5] });
 same('going on to the next section plays straight through', seam(part(3, 14, {}), 'out'), null);
 same('a matched fade-in cannot start before the recording', plan.seamFades(chorus2, part(0, 1, {}), 14, steady, 'out')!.in, [-1, -1]);
+// A jump to another song, here with one-second beats: the next index is not straight on, the same index is not a loop.
+const slow = map.buildGrid(Array.from({ length: 30 }, (_, i) => ({ t: i, one: i % 4 === 0 })), 4, 30, false);
+same('a jump to another song never plays straight on', plan.seamFades(chorus2, part(3, 14, {}), 14, steady, 'out', slow), { out: [-2.5, -1.5], in: [-2.5, -1.5] });
+same('nor counts as a loop', plan.seamFades(chorus2, part(2, 8, { pickupBeats: 1 }), 14, steady, 'out', slow), { out: [-2.5, -1.5], in: [-2.5, -1.5] });
+same("the other song's pickup and fade-in follow its own beats", plan.seamFades(chorus2, part(2, 8, { pickupBeats: 1 }), 14, steady, 'edited', slow), { out: [-2.5, -1.5], in: [-2, -1] });
 const chorus = map.sectionViews(s)[2];
 const sg = map.songGrid(s);
 same('next beat boundary', r3(plan.nextBoundary('beat', 17.3, chorus, sg, chorus.end)), 17.5);

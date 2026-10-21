@@ -1,7 +1,7 @@
 import type { Pad, Song } from '../types';
 import { getAudio } from '../lib/db';
 import { barBeatAt, barSeconds, beatPos, beatTime, keyOf, sectionViews, songGrid, upper, type Grid, type SectionView } from '../lib/songMap';
-import { EVEN_LOUDNESS, clockBoundary, decideNext, fadeCurve, fadeOutStart, leadIn, nextBoundary, seamEnd, seamFades, type FadeShape, type JumpFade, type Reason } from '../lib/performPlan';
+import { EVEN_LOUDNESS, clockBoundary, decideNext, fadeCurve, fadeOutStart, leadIn, nextBoundary, seamEnd, seamFades, type FadeShape, type JumpFade, type Reason, type SeamFades } from '../lib/performPlan';
 
 const COMMIT_AHEAD = 3;
 const MIN_RAMP = 0.005;
@@ -170,6 +170,11 @@ function click(at: number, accent: boolean) {
   osc.stop(at + 0.08);
 }
 
+/** A one-bar count-in that ends on `landing`. */
+function countIn(landing: number, bar: number, beatsPerBar: number) {
+  for (let k = 0; k < beatsPerBar; k++) click(landing - bar + (k * bar) / beatsPerBar, k === 0);
+}
+
 /** Plain playback for the editor screens. */
 class Transport {
   id: string | null = null;
@@ -316,6 +321,8 @@ export interface Snapshot {
     secondsLeft: number;
     next: null | { idx: number; reason: Reason; bars: number; beats: number; landingCtx: number };
     ending: boolean;
+    /** Brought in, and not landed yet. */
+    arriving: boolean;
   };
   pad: null | { tonic: number; since: number; next: { tonic: number; at: number } | null };
   clock: null | { bar: number; beat: number; beatsPerBar: number };
@@ -396,18 +403,10 @@ export class PerformSession {
     for (const segment of this.segments) stop(segment.voice);
     for (const tail of this.tails) stop(tail.voice);
     this.tails = [];
-    this.resume();
-    this.ps = ps;
-    this.segments = [];
-    this.planned = null;
-    this.pick = null;
-    this.holding = false;
-    this.endAt = null;
-    this.forced = false;
-    this.only = options.passes ? { idx: options.from, passes: options.passes, until: options.until } : undefined;
+    this.begin(ps, options.passes ? { idx: options.from, passes: options.passes, until: options.until } : undefined);
     const view = ps.views[options.from];
     const lead = view.start - leadIn(view, ps.grid).audioStart;
-    this.enter(options.from, 1, 'plan', options.landingCtx ?? now() + 0.1 + lead, null, 0);
+    this.enter(options.from, 1, 'plan', options.landingCtx ?? now() + 0.1 + lead, null, null);
     this.tick();
   }
 
@@ -418,12 +417,72 @@ export class PerformSession {
     const bar = barSeconds(ps.grid, view.s);
     const earliest = now() + Math.max(lead, options.countIn ? bar : 0) + 0.05;
     const landing = this.clock ? clockBoundary(this.clock.anchor, this.clock.barLen, earliest) : earliest;
-    if (options.countIn) {
-      for (let k = 0; k < ps.song.beatsPerBar; k++) click(landing - bar + (k * bar) / ps.song.beatsPerBar, k === 0);
-    }
+    if (options.countIn) countIn(landing, bar, ps.song.beatsPerBar);
     this.fadePads(landing, options.keepPad ? landing + 8 * bar : landing + options.crossfade);
     this.startSong(ps, { from: options.from, landingCtx: landing });
     return landing;
+  }
+
+  /**
+   * Jump to a section of another song. It lands on the first bar line of the song playing that leaves room for its
+   * fades and count-in, and the two meet the way the Jumps setting says. With no song playing, it comes in like the
+   * next song. Returns the landing, or null while a song brought in earlier has not landed yet.
+   */
+  switchSong(ps: PerfSong, from: number, options: { countIn: boolean; keepPad: boolean; crossfade: number }): number | null {
+    const old = this.ps;
+    if (!old || this.segments.length === 0) return this.startNext(ps, { from, ...options });
+    const t = now();
+    if (t < this.segments[0].landingCtx) return null;
+    this.revoke();
+    const playing = this.segments;
+    const tail = playing[playing.length - 1];
+    const view = ps.views[from];
+    const bar = barSeconds(ps.grid, view.s);
+    const d = old.grid.downbeats;
+    const last = d.length - 1;
+    // Past the last bar line, in the ring-out, bars keep the last bar's length.
+    const barLine = (k: number) => (k <= last ? d[k] : d[last] + (k - last) * barSeconds(old.grid, last));
+    let k = upper(d, tail.landingAudio + Math.max(0, t - tail.landingCtx));
+    let found: { landing: number; fades: SeamFades } | null = null;
+    for (let tries = 0; tries < 64 && !found; tries++, k++) {
+      const boundary = barLine(k);
+      const landing = tail.landingCtx + (boundary - tail.landingAudio);
+      const fades = seamFades(old.views[tail.idx], view, boundary, old.grid, this.jumpFade, ps.grid);
+      if (fades && landing + Math.min(fades.in[0], fades.out[0], options.countIn ? -bar : 0) >= t + 0.05) found = { landing, fades };
+    }
+    // Only a broken grid gets here. The plan was made from passes just revoked, so let the next tick make it again.
+    if (!found) {
+      this.planned = null;
+      return null;
+    }
+    const { landing, fades } = found;
+    if (options.countIn) countIn(landing, bar, ps.song.beatsPerBar);
+    this.fadePads(landing, options.keepPad ? landing + 8 * bar : landing + options.crossfade);
+    this.begin(ps);
+    this.enter(from, 1, 'pick', landing, tail, fades);
+    // The old song rings out under the new one, then stops.
+    playing.forEach((segment, j) => {
+      const after = playing[j + 1] ?? this.segments[0];
+      if (after.voice === segment.voice) return;
+      const end = Math.max(t, after.prevEndCtx) + 0.1;
+      stop(segment.voice, end);
+      this.tails.push({ voice: segment.voice, end });
+    });
+    this.tick();
+    return landing;
+  }
+
+  /** Clear the song state for a new song. Passes still sounding are the caller's to stop. */
+  private begin(ps: PerfSong, only?: PerformSession['only']) {
+    this.resume();
+    this.ps = ps;
+    this.segments = [];
+    this.planned = null;
+    this.pick = null;
+    this.holding = false;
+    this.endAt = null;
+    this.forced = false;
+    this.only = only;
   }
 
   pickSection(idx: number) {
@@ -610,11 +669,11 @@ export class PerformSession {
     return seamFades(ps.views[from.idx], ps.views[idx], boundaryAudio, ps.grid, this.jumpFade);
   }
 
-  private enter(idx: number, pass: number, reason: Reason, landing: number, prev: Segment | null, boundaryAudio: number) {
+  /** `fades` null with a `prev` runs the recording straight on from it. */
+  private enter(idx: number, pass: number, reason: Reason, landing: number, prev: Segment | null, fades: SeamFades | null) {
     const ps = this.ps!;
     const view = ps.views[idx];
     const seamAudio = seamEnd(view, ps.grid, ps.buffer.duration);
-    const fades = prev && this.fades(prev, idx, boundaryAudio);
     if (prev && !fades) {
       this.segments.push({ idx, pass, reason, landingCtx: landing, landingAudio: view.start, seamAudio, startCtx: landing, prevFadeCtx: landing, prevEndCtx: landing, prevPoints: prev.voice.points, voice: prev.voice });
       return;
@@ -689,13 +748,15 @@ export class PerformSession {
       done.forEach(releasePad);
       this.fading = this.fading.filter(pad => t < pad.until);
     }
+    // Each one holds a decoded song.
+    if (this.tails.some(tail => tail.end <= t)) this.tails = this.tails.filter(tail => tail.end > t);
     if (!ps || this.segments.length === 0) return;
     while (this.segments.length > 1 && t >= this.segments[1].landingCtx) {
       const old = this.segments.shift()!;
       if (old.voice === this.segments[0].voice) continue;
       const end = Math.max(t, this.segments[0].prevEndCtx) + 0.1;
       stop(old.voice, end);
-      this.tails = [...this.tails.filter(tail => tail.end > t), { voice: old.voice, end }];
+      this.tails.push({ voice: old.voice, end });
     }
     for (let guard = 0; guard < 8; guard++) {
       const tail = this.segments[this.segments.length - 1];
@@ -706,9 +767,9 @@ export class PerformSession {
       // Commit before the first fade starts, so even a long fade-out plays in full.
       const fades = this.fades(tail, planned.idx, planned.boundaryAudio);
       if (t < landing + (fades ? Math.min(fades.in[0], fades.out[0]) : 0) - COMMIT_AHEAD) break;
-      const { idx, pass, reason, boundaryAudio } = planned;
+      const { idx, pass, reason } = planned;
       this.planned = null;
-      this.enter(idx, pass, reason, landing, tail, boundaryAudio);
+      this.enter(idx, pass, reason, landing, tail, fades);
     }
     if (this.planned === 'end' && this.segments.length === 1 && this.endAt === null) {
       const tail = this.segments[0];
@@ -796,6 +857,7 @@ export class PerformSession {
         secondsLeft: Math.max(0, current.seamAudio - pos) + remainingPasses * (view.end - view.start) + later,
         next,
         ending: this.planned === 'end' || this.endAt !== null,
+        arriving: t < current.landingCtx,
       };
     }
     const newest = this.pads[0] ?? null;

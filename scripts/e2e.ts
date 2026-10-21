@@ -531,6 +531,29 @@ async function main() {
     );
     check('Chorus 2 lands on a bar line', barLine - 1 < 0.005, barLine - 1);
     await waitFor(`__djw.session.snapshot().song.idx === 4`, 'Chorus 2 is playing', 8000);
+    // Page to the next song while this one plays and jump into its Chorus, then page back into Chorus 1 of this one.
+    const barLines = `(() => { const s = __djw.session; return s.segments.flatMap(seg => s.ps.grid.downbeats.map(d => seg.landingCtx + d - seg.landingAudio)); })()`;
+    const onBarLine = (lines: number[], landing: number) => Math.min(...lines.map(line => Math.abs(line - landing)));
+    await clickAt(`document.querySelector('[aria-label="Next song, Evening Test"]')`);
+    await waitFor(`document.body.innerText.includes('Now playing: Morning Test · Chorus 2') && document.body.textContent.includes('Song 2 of 2')`, 'paging shows the next song while this one plays');
+    check('paging leaves the song playing', (await ev<string>('__djw.session.snapshot().song?.title')) === 'Morning Test' && (await ev<number>('__djw.engine.level()')) > 0.005);
+    const tile = (name: string) => `[...document.querySelectorAll('main button')].find(b => b.textContent.includes(${JSON.stringify(name)}))`;
+    await waitFor(`${tile('Chorus')}?.disabled === false`, 'the paged song decodes');
+    await shot('6b-perform-paging');
+    const morningLines = await ev<number[]>(barLines);
+    await press('2');
+    const toEvening = await waitFor<number>(`__djw.session.ps.song.title === 'Evening Test' && __djw.session.segments[0].landingCtx`, 'a section of another song is brought in');
+    check('it lands on a bar line of the song playing', onBarLine(morningLines, toEvening) < 0.005, onBarLine(morningLines, toEvening));
+    check('with room for its 1-bar count-in at its own tempo', toEvening - (await ev<number>('__djw.engine.now()')) > 3.5, toEvening);
+    await waitFor(`__djw.session.snapshot().song.idx === 1 && !__djw.session.snapshot().song.arriving && document.body.innerText.includes('Now: Chorus')`, 'Evening Test plays from its Chorus', 12000);
+    await waitFor(`__djw.engine.now() > ${toEvening} + 0.2 && __djw.session.tails.length === 0 && __djw.engine.level() > 0.005`, 'the old song has faded and stopped');
+    await press('ArrowLeft');
+    await waitFor(`document.body.innerText.includes('Now playing: Evening Test · Chorus') && ${tile('Chorus 1')}?.disabled === false`, 'paging back shows the song before');
+    const eveningLines = await ev<number[]>(barLines);
+    await clickAt(tile('Chorus 1'));
+    const toMorning = await waitFor<number>(`__djw.session.ps.song.title === 'Morning Test' && __djw.session.segments[0].landingCtx`, 'a section of a song from earlier in the set is brought back');
+    check('it lands on a bar line of Evening Test', onBarLine(eveningLines, toMorning) < 0.005, onBarLine(eveningLines, toMorning));
+    await waitFor(`__djw.session.snapshot().song.idx === 2 && !__djw.session.snapshot().song.arriving`, 'Morning Test plays again from Chorus 1', 12000);
     // Pause fades out over 3 bars (6 s at 120 BPM) and then stops the clock. Resume fades back in over 2.
     const gain = '__djw.engine.audio().main.gain.value';
     check('Fade is on by default', (await ev<string>(`${find('Fade')}.getAttribute('aria-checked')`)) === 'true');
@@ -561,6 +584,10 @@ async function main() {
     check('pad groups', (await text()).includes('Fits both') && (await text()).includes('Fits the next song, D'));
     await clickAt(`document.querySelector('[aria-label^="Pad E,"]')`);
     await waitFor(`__djw.session.snapshot().pad?.tonic === 4 && !__djw.session.snapshot().pad.next`, 'pad changes on the next bar', 8000);
+    await press('ArrowLeft');
+    await waitFor(`document.body.innerText.includes('Now playing: the E pad') && document.body.textContent.includes('Song 1 of 2')`, 'paging back from a pad shows the song that ended');
+    await press('Escape');
+    await waitFor(`document.body.innerText.includes('Morning Test ended.') && document.body.textContent.includes('Pad after song 1')`, 'Escape goes back to what is playing');
     await shot('7-perform-pad');
     await click('Simple');
     await click('Guided');

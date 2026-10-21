@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Pause, Play } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react';
 import type { Song } from '../types';
 import { go, useStore } from '../store';
 import { useFrame, useKeys } from '../ui';
 import { PerformSession, audio, now, padSourceFor, perfSong, release, type PerfSong, type Snapshot } from '../audio/engine';
 import { KEY_NAMES, numeral, padGroups, route } from '../lib/music';
-import { barSeconds, clock, keyOf, planSeconds, sectionViews, songGrid, songKeys } from '../lib/songMap';
+import { barSeconds, clock, keyOf, planSeconds, sectionViews, songGrid, songKeys, type SectionView } from '../lib/songMap';
 import type { JumpFade, Reason } from '../lib/performPlan';
 import { livePad, songBpm } from './Sets';
 
@@ -57,6 +57,8 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   const [exitArmed, setExitArmed] = useState(false);
   const [moreOpen, setMoreOpen] = useState(item % 2 === 1);
   const [startAt, setStartAt] = useState(0);
+  /** The song on screen when it is not the one playing: paging lets you look at any song while the set plays on. */
+  const [viewing, setViewing] = useState<number | null>(null);
   const sessionRef = useRef<PerformSession | null>(null);
   const currentRef = useRef(current);
   currentRef.current = current;
@@ -84,23 +86,27 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
     return () => session.dispose();
   }, []);
 
-  // Only the song playing and the one after it stay decoded; each is about 100 MB.
+  // Only the song playing, the one after it and the one on screen stay decoded; each is about 100 MB.
   const songIndex = Math.floor(current / 2);
+  const browsed = viewing === null ? undefined : items[viewing];
   useEffect(() => {
     let cancelled = false;
-    const needed = [items[songIndex], items[songIndex + 1]].filter((song): song is Song => Boolean(song));
-    const ids = needed.map(song => song.id);
-    release(ids);
+    const live = [items[songIndex], items[songIndex + 1]].filter((song): song is Song => Boolean(song));
+    const ids = [...live, browsed].map(song => song?.id);
+    release(ids.filter((id): id is string => Boolean(id)));
     setLoadedSongs(all => Object.fromEntries(Object.entries(all).filter(([id]) => ids.includes(id))));
-    for (const song of needed) {
+    const load = (song: Song) =>
       void perfSong(song).then(ps => {
         if (!cancelled) setLoadedSongs(all => ({ ...all, [song.id]: ps }));
       });
-    }
+    live.forEach(load);
+    // Paging past a song should not decode it, so wait until the page stays put.
+    const timer = browsed && window.setTimeout(() => load(browsed), 300);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer || undefined);
     };
-  }, [items, songIndex]);
+  }, [items, songIndex, browsed]);
 
   const session = sessionRef.current;
   const snap: Snapshot | null = session?.snapshot() ?? null;
@@ -146,24 +152,29 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
     session.startSong(ps, { from: 0 });
     setStarted(true);
   };
-  const bringIn = () => {
-    const target = next ? loadedSongs[next.id] : undefined;
-    if (!session || !target || target.views.length === 0) return;
-    session.startNext(target, {
-      from: Math.min(startAt, target.views.length - 1),
-      countIn: prefs.countIn,
-      keepPad: prefs.keepPad,
-      crossfade: crossfadeSeconds(),
-    });
-    setCurrent(current + 1);
-    setStarted(true);
-    setStartAt(0);
-    setMoreOpen(false);
-  };
   const crossfadeSeconds = () => {
     const bar = session?.clock?.barLen ?? 2;
     return prefs.crossfade === 'beat' ? bar / (session?.clock?.beatsPerBar ?? 4) : prefs.crossfade === 'bar' ? bar : 2 * bar;
   };
+  /** Bring in a section of any song in the set, from a song, a pad, or silence. The set goes on from that song. */
+  const jumpTo = (index: number, section: number) => {
+    const target = items[index] ? loadedSongs[items[index].id] : undefined;
+    if (!session || !target || section >= target.views.length) return;
+    const landing = session.switchSong(target, section, { countIn: prefs.countIn, keepPad: prefs.keepPad, crossfade: crossfadeSeconds() });
+    if (landing === null) return;
+    setCurrent(2 * index);
+    setStarted(true);
+    setViewing(null);
+    setStartAt(0);
+    setMoreOpen(false);
+  };
+  const bringIn = () => jumpTo(songIndex + 1, Math.min(startAt, sectionViews(next!).length - 1));
+  /** The song one page away, or null at either end of the set. From a pad, back is the song that just ended. */
+  const pageTo = (dir: 1 | -1) => {
+    const to = viewing !== null ? viewing + dir : isSong ? songIndex + dir : songIndex + (dir > 0 ? 1 : 0);
+    return to >= 0 && to < items.length ? to : null;
+  };
+  const show = (index: number | null) => setViewing(index !== null && isSong && index === songIndex ? null : index);
   const tapPad = (tonic: number) => {
     if (!session) return;
     void session.setPad(tonic, session.padBoundary(prefs.changeOn), crossfadeSeconds());
@@ -199,6 +210,19 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   });
 
   useKeys(event => {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      // A focused slider keeps its arrows.
+      if (event.target instanceof HTMLInputElement) return;
+      event.preventDefault();
+      const to = pageTo(event.key === 'ArrowLeft' ? -1 : 1);
+      if (to !== null) show(to);
+      return;
+    }
+    if (browsed && event.key === 'Escape') return setViewing(null);
+    if (browsed && /^[1-9]$/.test(event.key)) {
+      event.preventDefault();
+      return jumpTo(viewing!, Number(event.key) - 1);
+    }
     if (finished) return;
     if (event.key === ' ') {
       event.preventDefault();
@@ -220,6 +244,9 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
 
   if (!set) return <p className="p-8">That set no longer exists.</p>;
 
+  const live = snap?.song ? `${snap.song.title} · ${views[snap.song.idx]?.name ?? ''}` : snap?.pad ? `the ${KEY_NAMES[snap.pad.tonic]} pad` : null;
+  const pagePrev = pageTo(-1);
+  const pageNext = pageTo(1);
   const position = isSong ? (snap?.song ? { bar: snap.song.bar, beat: snap.song.beat, per: snap.song.beatsPerBar } : null) : snap?.clock ? { bar: snap.clock.bar, beat: snap.clock.beat, per: snap.clock.beatsPerBar } : null;
   const keyNow = isSong ? (snap?.song ? views[snap.song.idx]?.key : views[0]?.key) : snap?.pad ? KEY_NAMES[snap.pad.tonic] : null;
 
@@ -277,9 +304,24 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
       </header>
 
       <div className="grid flex-1 grid-cols-[200px_minmax(0,1fr)_290px] max-lg:grid-cols-[minmax(0,1fr)_260px]">
-        <SetList items={items} current={current} />
+        <SetList items={items} current={current} viewing={viewing} onView={show} />
         <main className="border-x border-stage-line px-6 py-6 max-lg:border-l-0">
-          {finished ? (
+          <Pager
+            label={viewing !== null ? `Song ${viewing + 1} of ${items.length}` : finished ? 'End of the set' : isSong ? `Song ${songIndex + 1} of ${items.length}` : `Pad after song ${songIndex + 1}`}
+            prev={pagePrev === null ? undefined : items[pagePrev]}
+            next={pageNext === null ? undefined : items[pageNext]}
+            onPage={dir => show(pageTo(dir))}
+          />
+          {browsed ? (
+            <BrowseSong
+              song={browsed}
+              ready={Boolean(loadedSongs[browsed.id])}
+              arriving={snap?.song?.arriving ? snap.song.title : null}
+              live={live}
+              onBack={() => setViewing(null)}
+              onPick={section => jumpTo(viewing!, section)}
+            />
+          ) : finished ? (
             <div className="py-16 text-center">
               <p className="text-3xl font-bold">That is the set.</p>
               <button type="button" className="mt-6 rounded-md bg-stage-text px-5 py-3 font-medium text-stage-bg" onClick={() => go({ page: 'sets', id: set.id })}>
@@ -326,7 +368,7 @@ function Stat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function SetList({ items, current }: { items: Song[]; current: number }) {
+function SetList({ items, current, viewing, onView }: { items: Song[]; current: number; viewing: number | null; onView: (index: number) => void }) {
   return (
     <nav className="px-3 py-5 max-lg:hidden" aria-label="Set">
       <p className="mb-3 px-1 font-mono text-xs uppercase tracking-wider text-stage-muted">Set</p>
@@ -334,7 +376,7 @@ function SetList({ items, current }: { items: Song[]; current: number }) {
         {items.flatMap((song, i) => {
           const pad = livePad(song, items[i + 1]);
           return [
-            <Row key={song.id} index={2 * i} current={current} lead={String(i + 1)} title={song.title} tail={keysOf(song)} />,
+            <Row key={song.id} index={2 * i} current={current} lead={String(i + 1)} title={song.title} tail={keysOf(song)} viewing={viewing === i} onClick={() => onView(i)} />,
             <Row key={`${song.id}-pad`} index={2 * i + 1} current={current} lead="pad" title={pad.to === 'end' ? `${pad.from} · end` : `${pad.from} → ${pad.to}`} mono />,
           ];
         })}
@@ -348,7 +390,8 @@ function keysOf(song: Song): string {
   return !keys ? '' : keys.start === keys.end ? keys.start : `${keys.start} → ${keys.end}`;
 }
 
-function Row({ index, current, lead, title, tail, mono }: { index: number; current: number; lead: string; title: string; tail?: string; mono?: boolean }) {
+function Row(props: { index: number; current: number; lead: string; title: string; tail?: string; mono?: boolean; viewing?: boolean; onClick?: () => void }) {
+  const { index, current, lead, title, tail, mono, viewing, onClick } = props;
   const state = index < current ? 'done' : index === current ? 'now' : index === current + 1 ? 'deck' : 'later';
   const style = {
     done: 'text-stage-muted line-through',
@@ -356,12 +399,90 @@ function Row({ index, current, lead, title, tail, mono }: { index: number; curre
     deck: 'border border-dashed border-stage-muted',
     later: '',
   }[state];
-  return (
-    <li className={`flex items-center gap-3 rounded-md px-2.5 py-2 text-sm ${style}`} aria-current={state === 'now' ? 'step' : undefined}>
+  const className = `flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left text-sm ${style} ${viewing ? 'ring-2 ring-inset ring-stage-accent' : ''}`;
+  const body = (
+    <>
       <span className="w-7 shrink-0 font-mono text-xs text-stage-muted">{lead}</span>
       <span className={`min-w-0 flex-1 ${mono ? 'font-mono' : ''}`}>{title}</span>
       {tail && <span className="shrink-0 font-mono text-xs">{tail}</span>}
+    </>
+  );
+  return (
+    <li aria-current={state === 'now' ? 'step' : undefined}>
+      {onClick ? (
+        <button type="button" className={`${className} hover:bg-stage-card`} aria-pressed={viewing} onClick={onClick}>
+          {body}
+        </button>
+      ) : (
+        <div className={className}>{body}</div>
+      )}
     </li>
+  );
+}
+
+function Pager({ label, prev, next, onPage }: { label: string; prev?: Song; next?: Song; onPage: (dir: 1 | -1) => void }) {
+  const button = 'flex min-w-0 max-w-full items-center gap-1.5 rounded-md border border-stage-line px-3 py-2 text-sm hover:bg-stage-card disabled:invisible';
+  return (
+    <div className="mb-5 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
+      <button type="button" className={`${button} justify-self-start`} disabled={!prev} aria-label={prev && `Previous song, ${prev.title}`} onClick={() => onPage(-1)}>
+        <ChevronLeft className="h-4 w-4 shrink-0" />
+        <span className="truncate">{prev?.title}</span>
+      </button>
+      <p className="shrink-0 font-mono text-xs uppercase tracking-wider text-stage-muted">{label}</p>
+      <button type="button" className={`${button} justify-self-end`} disabled={!next} aria-label={next && `Next song, ${next.title}`} onClick={() => onPage(1)}>
+        <span className="truncate">{next?.title}</span>
+        <ChevronRight className="h-4 w-4 shrink-0" />
+      </button>
+    </div>
+  );
+}
+
+/** Another song in the set, while the set plays on. A section tapped here comes in on a bar line of what is playing. */
+function BrowseSong(props: { song: Song; ready: boolean; arriving: string | null; live: string | null; onBack: () => void; onPick: (section: number) => void }) {
+  const { song, ready, arriving, live } = props;
+  return (
+    <div>
+      <div className="mb-5 flex min-h-[64px] items-center justify-between gap-4 rounded-lg border border-stage-accent px-4 py-3">
+        <p aria-live="polite">{live ? <>Now playing: <b>{live}</b></> : 'Nothing is playing yet.'}</p>
+        <button type="button" className="shrink-0 rounded-md border border-stage-line px-4 py-2 hover:bg-stage-card" onClick={props.onBack}>
+          Back to it
+        </button>
+      </div>
+      <h1 className="text-4xl font-bold">{song.title}</h1>
+      <p className="mb-5 mt-2 text-stage-muted">
+        {!ready ? 'Loading…' : arriving ? `Wait for ${arriving} to come in.` : `Tap a section to bring it in on the next bar.${live ? ' What is playing fades out.' : ''}`}
+      </p>
+      <SectionTiles views={sectionViews(song)} disabled={!ready || Boolean(arriving)} onPick={props.onPick} />
+    </div>
+  );
+}
+
+function SectionTiles({ views, playing, queued, disabled, onPick }: { views: SectionView[]; playing?: number; queued?: number; disabled: boolean; onPick: (index: number) => void }) {
+  return (
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
+      {views.map((view, i) => {
+        const isPlaying = playing === i;
+        const isQueued = queued === i && !isPlaying;
+        return (
+          <button
+            key={view.section.id}
+            type="button"
+            disabled={disabled}
+            onClick={() => onPick(i)}
+            className={`min-h-[104px] rounded-lg border px-3.5 py-3 text-left transition-colors ${isPlaying ? 'border-stage-accent bg-stage-accent text-stage-bg' : isQueued ? 'border-2 border-stage-accent bg-stage-card' : 'border-stage-line bg-stage-card hover:border-stage-muted'} disabled:cursor-default`}
+          >
+            <span className="flex justify-between font-mono text-xs">
+              <span>{i + 1}</span>
+              <span>{isPlaying ? 'PLAYING' : isQueued ? 'NEXT' : ''}</span>
+            </span>
+            <span className="mt-2 block text-2xl font-semibold">{view.name}</span>
+            <span className={`mt-1 block font-mono text-xs ${isPlaying ? '' : 'text-stage-muted'}`}>
+              {view.e - view.s} bars · {view.key ?? '—'}
+            </span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -393,30 +514,7 @@ function SongPads({ song, snap, started, ready, onStart, session }: { song: Song
           {ready ? `Start ${views[0]?.name ?? 'song'}` : 'Loading…'}
         </button>
       )}
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
-        {views.map((view, i) => {
-          const playing = snap?.idx === i;
-          const queued = next?.idx === i && !playing;
-          return (
-            <button
-              key={view.section.id}
-              type="button"
-              disabled={!started}
-              onClick={() => session?.pickSection(i)}
-              className={`min-h-[104px] rounded-lg border px-3.5 py-3 text-left transition-colors ${playing ? 'border-stage-accent bg-stage-accent text-stage-bg' : queued ? 'border-2 border-stage-accent bg-stage-card' : 'border-stage-line bg-stage-card hover:border-stage-muted'} disabled:cursor-default`}
-            >
-              <span className="flex justify-between font-mono text-xs">
-                <span>{i + 1}</span>
-                <span>{playing ? 'PLAYING' : queued ? 'NEXT' : ''}</span>
-              </span>
-              <span className="mt-2 block text-2xl font-semibold">{view.name}</span>
-              <span className={`mt-1 block font-mono text-xs ${playing ? '' : 'text-stage-muted'}`}>
-                {view.e - view.s} bars · {view.key ?? '—'}
-              </span>
-            </button>
-          );
-        })}
-      </div>
+      <SectionTiles views={views} playing={snap?.idx} queued={next?.idx} disabled={!started} onPick={i => session?.pickSection(i)} />
       {snap && (
         <div className="mt-5 flex min-h-[78px] items-center justify-between gap-4 rounded-lg border border-stage-line px-4 py-3">
           <p aria-live="polite">
