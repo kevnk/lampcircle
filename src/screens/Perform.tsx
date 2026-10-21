@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, Pause, Play, Square } from 'lucide-react';
 import type { Song, WorshipSet } from '../types';
 import { go, useStore } from '../store';
 import { useFrame, useKeys } from '../ui';
@@ -119,6 +119,8 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   const left = !isSong ? items[songIndex] : undefined;
   const next = !isSong ? items[songIndex + 1] : undefined;
   const finished = current >= items.length * 2;
+  /** The pad after the last song. Pause gives way to End set here. */
+  const lastItem = current === items.length * 2 - 1;
   const endTonic = (target: Song | undefined) => keyOf(songKeys(target!)?.end)?.tonic ?? 0;
   /** The pads planned for the gap after a song that are in the library, in play order. */
   const gapPads = (from: Song | undefined, to: Song | undefined) => (from ? wayIn(set, from, to).tonics.filter(tonic => have.has(tonic)) : []);
@@ -268,6 +270,7 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
     if (event.key === ' ') {
       event.preventDefault();
       if (isSong && !started) startSong(0);
+      else if (lastItem) fadeOutEnd();
       else togglePause();
     } else if (isSong && /^[1-9]$/.test(event.key)) {
       event.preventDefault();
@@ -307,7 +310,12 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
           {exitArmed ? 'Tap again to stop' : 'Exit'}
         </button>
         <div className="ml-auto flex items-center gap-5">
-          {(started || !isSong) && !finished && (
+          {lastItem ? (
+            <button type="button" className="flex items-center gap-2 rounded-md border border-stage-line px-4 py-2 hover:bg-stage-card" onClick={fadeOutEnd}>
+              <Square className="h-4 w-4 fill-current" />
+              End set
+            </button>
+          ) : (started || !isSong) && !finished && (
             <div className="flex items-center gap-3">
               <button type="button" className="flex items-center gap-2 rounded-md border border-stage-line px-4 py-2 hover:bg-stage-card" onClick={togglePause}>
                 {snap?.paused ? <Play className="h-4 w-4 fill-current" /> : <Pause className="h-4 w-4 fill-current" />}
@@ -409,7 +417,6 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
               moreOpen={moreOpen}
               onMore={() => setMoreOpen(!moreOpen)}
               onBringIn={bringIn}
-              onFadeOut={fadeOutEnd}
             />
           ) : null}
         </aside>
@@ -899,7 +906,6 @@ function BringIn(props: {
   moreOpen: boolean;
   onMore: () => void;
   onBringIn: () => void;
-  onFadeOut: () => void;
 }) {
   const { next, snap, prefs, onPrefs, startAt } = props;
   if (!next) {
@@ -907,10 +913,7 @@ function BringIn(props: {
       <div>
         <p className="mb-3 font-mono text-xs uppercase tracking-wider text-stage-muted">End of the set</p>
         <div className="rounded-lg border border-stage-line p-4">
-          <p className="text-sm text-stage-muted">Play the pad as long as the room needs it.</p>
-          <button type="button" className="mt-3 w-full rounded-md bg-stage-text px-4 py-3.5 font-semibold text-stage-bg" onClick={props.onFadeOut}>
-            Fade out the pad
-          </button>
+          <p className="text-sm text-stage-muted">Play the pad as long as the room needs it, then End set fades it out.</p>
         </div>
         <Mix prefs={prefs} onPrefs={onPrefs} />
       </div>
