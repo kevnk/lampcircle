@@ -575,7 +575,8 @@ async function main() {
     await press('2');
     const toEvening = await waitFor<number>(`__djw.session.ps.song.title === 'Evening Test' && __djw.session.segments[0].landingCtx`, 'a section of another song is brought in');
     check('it lands on a bar line of the song playing', onBarLine(morningLines, toEvening) < 0.005, onBarLine(morningLines, toEvening));
-    check('with room for its 1-bar count-in at its own tempo', toEvening - (await ev<number>('__djw.engine.now()')) > 3.5, toEvening);
+    // No count-in: the first bar line past its half-second crossfade, so within one 2-second bar of Morning Test.
+    check('with no count-in, it comes in on the first bar line it has room for', toEvening - (await ev<number>('__djw.engine.now()')) < 2.6, toEvening);
     await waitFor(`__djw.session.snapshot().song.idx === 1 && !__djw.session.snapshot().song.arriving && document.body.innerText.includes('Now: Chorus')`, 'Evening Test plays from its Chorus', 12000);
     await waitFor(`__djw.engine.now() > ${toEvening} + 0.2 && __djw.session.tails.length === 0 && __djw.engine.level() > 0.005`, 'the old song has faded and stopped');
     await press('ArrowLeft');

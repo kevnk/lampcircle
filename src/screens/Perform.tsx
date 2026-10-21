@@ -3,7 +3,7 @@ import { ChevronDown, ChevronLeft, ChevronRight, Pause, Play } from 'lucide-reac
 import type { Song } from '../types';
 import { go, useStore } from '../store';
 import { useFrame, useKeys } from '../ui';
-import { PerformSession, audio, now, padSourceFor, perfSong, release, type PerfSong, type Snapshot } from '../audio/engine';
+import { PerformSession, now, padSourceFor, perfSong, release, type PerfSong, type Snapshot } from '../audio/engine';
 import { KEY_NAMES, numeral, padGroups, route } from '../lib/music';
 import { barSeconds, clock, keyOf, planSeconds, sectionViews, songGrid, songKeys, type SectionView } from '../lib/songMap';
 import type { JumpFade, Reason } from '../lib/performPlan';
@@ -14,14 +14,13 @@ interface Prefs {
   mode: PadMode;
   changeOn: 'beat' | 'bar';
   crossfade: 'beat' | 'bar' | 'bars';
-  countIn: boolean;
   keepPad: boolean;
   padVolume: number;
   jumpFade: JumpFade;
   fillGaps: boolean;
   fadePause: boolean;
 }
-const DEFAULT_PREFS: Prefs = { mode: 'advanced', changeOn: 'bar', crossfade: 'beat', countIn: true, keepPad: true, padVolume: 0.8, jumpFade: 'out', fillGaps: true, fadePause: true };
+const DEFAULT_PREFS: Prefs = { mode: 'advanced', changeOn: 'bar', crossfade: 'beat', keepPad: true, padVolume: 0.8, jumpFade: 'out', fillGaps: true, fadePause: true };
 /** Bars that Pause fades out over and Resume fades back in over, when fading is on. */
 const PAUSE_FADE = { out: 3, in: 2 };
 
@@ -163,7 +162,7 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   const jumpTo = (index: number, section: number) => {
     const target = items[index] ? loadedSongs[items[index].id] : undefined;
     if (!session || !target || section >= target.views.length) return;
-    const landing = session.switchSong(target, section, { countIn: prefs.countIn, keepPad: prefs.keepPad, crossfade: crossfadeSeconds() });
+    const landing = session.switchSong(target, section, { keepPad: prefs.keepPad, crossfade: crossfadeSeconds() });
     if (landing === null) return;
     padOff.current = false;
     setCurrent(2 * index);
@@ -891,13 +890,6 @@ function BringIn(props: {
               </button>
             ))}
           </Choice>
-          <label className="flex items-start gap-3">
-            <input type="checkbox" className="mt-1 h-4 w-4" checked={prefs.countIn} onChange={event => onPrefs({ countIn: event.target.checked })} />
-            <span>
-              1-bar count-in click (in ears only)
-              {!audio().ears && <span className="block text-xs text-stage-muted">No separate ear output found, so the room hears it too.</span>}
-            </span>
-          </label>
           <Mix prefs={prefs} onPrefs={onPrefs} />
           <label className="flex items-start gap-3">
             <input type="checkbox" className="mt-1 h-4 w-4" checked={prefs.keepPad} onChange={event => onPrefs({ keepPad: event.target.checked })} />

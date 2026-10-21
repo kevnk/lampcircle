@@ -8,14 +8,11 @@ const MIN_RAMP = 0.005;
 
 interface Bus {
   ctx: AudioContext;
-  /** Song and pads together. The click does not go through it. */
+  /** Song and pads together. */
   main: GainNode;
   song: GainNode;
   pad: GainNode;
-  click: GainNode;
   meter: AnalyserNode;
-  /** True when the click has its own outputs (channels 3 and 4). */
-  ears: boolean;
 }
 
 let bus: Bus | null = null;
@@ -26,36 +23,14 @@ export function audio(): Bus {
   const main = ctx.createGain();
   const song = ctx.createGain();
   const pad = ctx.createGain();
-  const click = ctx.createGain();
   const meter = ctx.createAnalyser();
   meter.fftSize = 2048;
   song.connect(main);
   pad.connect(main);
   pad.gain.value = 0.8;
   main.connect(meter);
-  const out = ctx.destination;
-  const ears = out.maxChannelCount >= 4;
-  if (ears) {
-    out.channelCount = 4;
-    out.channelCountMode = 'explicit';
-    out.channelInterpretation = 'discrete';
-    const stereo = ctx.createGain();
-    stereo.channelCount = 2;
-    stereo.channelCountMode = 'explicit';
-    stereo.channelInterpretation = 'speakers';
-    const split = ctx.createChannelSplitter(2);
-    const merge = ctx.createChannelMerger(4);
-    main.connect(stereo).connect(split);
-    split.connect(merge, 0, 0);
-    split.connect(merge, 1, 1);
-    click.connect(merge, 0, 2);
-    click.connect(merge, 0, 3);
-    merge.connect(out);
-  } else {
-    main.connect(out);
-    click.connect(out);
-  }
-  bus = { ctx, main, song, pad, click, meter, ears };
+  main.connect(ctx.destination);
+  bus = { ctx, main, song, pad, meter };
   return bus;
 }
 
@@ -155,24 +130,6 @@ function stop(voice: Voice, at?: number) {
   } catch {
     // Already stopped.
   }
-}
-
-function click(at: number, accent: boolean) {
-  const { ctx, click: out } = audio();
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.frequency.value = accent ? 1600 : 1100;
-  gain.gain.setValueAtTime(0.0001, at);
-  gain.gain.exponentialRampToValueAtTime(0.6, at + 0.002);
-  gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.06);
-  osc.connect(gain).connect(out);
-  osc.start(at);
-  osc.stop(at + 0.08);
-}
-
-/** A one-bar count-in that ends on `landing`. */
-function countIn(landing: number, bar: number, beatsPerBar: number) {
-  for (let k = 0; k < beatsPerBar; k++) click(landing - bar + (k * bar) / beatsPerBar, k === 0);
 }
 
 /** Plain playback for the editor screens. */
@@ -414,14 +371,13 @@ export class PerformSession {
     this.tick();
   }
 
-  /** Bring in the next song on the pad clock, with an optional one-bar count-in at its own tempo. */
-  startNext(ps: PerfSong, options: { from: number; countIn: boolean; keepPad: boolean; crossfade: number }) {
+  /** Bring in the next song on the pad clock. */
+  startNext(ps: PerfSong, options: { from: number; keepPad: boolean; crossfade: number }) {
     const view = ps.views[options.from];
     const lead = view.start - leadIn(view, ps.grid).audioStart;
     const bar = barSeconds(ps.grid, view.s);
-    const earliest = now() + Math.max(lead, options.countIn ? bar : 0) + 0.05;
+    const earliest = now() + lead + 0.05;
     const landing = this.clock ? clockBoundary(this.clock.anchor, this.clock.barLen, earliest) : earliest;
-    if (options.countIn) countIn(landing, bar, ps.song.beatsPerBar);
     this.fadePads(landing, options.keepPad ? landing + 8 * bar : landing + options.crossfade);
     this.startSong(ps, { from: options.from, landingCtx: landing });
     return landing;
@@ -429,10 +385,10 @@ export class PerformSession {
 
   /**
    * Jump to a section of another song. It lands on the first bar line of the song playing that leaves room for its
-   * fades and count-in, and the two meet the way the Jumps setting says. With no song playing, it comes in like the
+   * fades, and the two meet the way the Jumps setting says. With no song playing, it comes in like the
    * next song. Returns the landing, or null while a song brought in earlier has not landed yet.
    */
-  switchSong(ps: PerfSong, from: number, options: { countIn: boolean; keepPad: boolean; crossfade: number }): number | null {
+  switchSong(ps: PerfSong, from: number, options: { keepPad: boolean; crossfade: number }): number | null {
     const old = this.ps;
     if (!old || this.segments.length === 0) return this.startNext(ps, { from, ...options });
     const t = now();
@@ -452,7 +408,7 @@ export class PerformSession {
       const boundary = barLine(k);
       const landing = tail.landingCtx + (boundary - tail.landingAudio);
       const fades = seamFades(old.views[tail.idx], view, boundary, old.grid, this.jumpFade, ps.grid);
-      if (fades && landing + Math.min(fades.in[0], fades.out[0], options.countIn ? -bar : 0) >= t + 0.05) found = { landing, fades };
+      if (fades && landing + Math.min(fades.in[0], fades.out[0]) >= t + 0.05) found = { landing, fades };
     }
     // Only a broken grid gets here. The plan was made from passes just revoked, so let the next tick make it again.
     if (!found) {
@@ -460,7 +416,6 @@ export class PerformSession {
       return null;
     }
     const { landing, fades } = found;
-    if (options.countIn) countIn(landing, bar, ps.song.beatsPerBar);
     this.fadePads(landing, options.keepPad ? landing + 8 * bar : landing + options.crossfade);
     this.begin(ps);
     this.enter(from, 1, 'pick', landing, tail, fades);
