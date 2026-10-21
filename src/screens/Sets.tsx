@@ -3,7 +3,7 @@ import { Menu as Handle, X } from 'lucide-react';
 import type { Song, WorshipSet } from '../types';
 import { go, useStore } from '../store';
 import { Button, Card, LinkButton, Menu, MenuItem } from '../ui';
-import { KEY_NAMES, route, tempoNote } from '../lib/music';
+import { KEY_NAMES, padFit, padGroups, route, tempoNote } from '../lib/music';
 import { bpmOf, isReady, keyOf, keysText, planSeconds, planText, songGrid, songKeys } from '../lib/songMap';
 
 export function songBpm(song: Song): number | null {
@@ -11,19 +11,28 @@ export function songBpm(song: Song): number | null {
   return bpm ? Math.round(bpm) : null;
 }
 
-/** The pad between two songs: the key you leave, the key you need, and the way in. */
+/** The pad between two songs: the key you leave and the key you need. */
 export function livePad(song: Song, next: Song | undefined) {
   const from = keyOf(songKeys(song)?.end);
   const to = next ? keyOf(songKeys(next)?.start) : null;
-  const way = from ? route(from, to) : [];
   const a = songBpm(song);
   const b = next ? songBpm(next) : null;
   return {
     from: from ? KEY_NAMES[from.tonic] : '—',
     to: next ? (to ? KEY_NAMES[to.tonic] : '—') : 'end',
-    way: way.map(tonic => KEY_NAMES[tonic]),
     note: a && b ? tempoNote(a, b) : null,
   };
+}
+
+/** Names the gap after a song by both songs, so a reorder that gives it new neighbours goes back to the suggestion. */
+export const gapKey = (song: Song, next: Song | undefined) => `${song.id}>${next?.id ?? 'end'}`;
+
+/** The pads for the gap after a song, in play order: the ones you picked, or the suggested way in. */
+export function wayIn(set: WorshipSet | undefined, song: Song, next: Song | undefined): { tonics: number[]; picked: boolean } {
+  const picked = set?.pads?.[gapKey(song, next)];
+  if (picked?.length) return { tonics: picked, picked: true };
+  const from = keyOf(songKeys(song)?.end);
+  return { tonics: from ? route(from, next ? keyOf(songKeys(next)?.start) : null) : [], picked: false };
 }
 
 export function Sets({ id }: { id?: string }) {
@@ -33,6 +42,8 @@ export function Sets({ id }: { id?: string }) {
   const [query, setQuery] = useState('');
   const [saved, setSaved] = useState(false);
   const [dragging, setDragging] = useState<number | null>(null);
+  /** The gap whose pads are open for picking. */
+  const [picking, setPicking] = useState<string | null>(null);
 
   const ready = useMemo(() => {
     const words = query.toLowerCase().trim();
@@ -66,6 +77,14 @@ export function Sets({ id }: { id?: string }) {
     const [moved] = ids.splice(from, 1);
     ids.splice(to, 0, moved);
     update({ songIds: ids });
+  };
+  const have = new Set(store.pads.map(pad => pad.tonic));
+  /** Null goes back to the suggested way in. */
+  const pickPads = (gap: string, tonics: number[] | null) => {
+    const pads = { ...set.pads };
+    if (tonics?.length) pads[gap] = tonics;
+    else delete pads[gap];
+    update({ pads });
   };
 
   return (
@@ -158,6 +177,8 @@ export function Sets({ id }: { id?: string }) {
           {items.length === 0 && <li className="rounded-md border border-dashed border-faint p-6 text-muted">Add ready songs from the left. They play in this order.</li>}
           {items.map((song, i) => {
             const pad = livePad(song, items[i + 1]);
+            const way = wayIn(set, song, items[i + 1]);
+            const gap = gapKey(song, items[i + 1]);
             const bpm = songBpm(song);
             return (
               <li
@@ -208,12 +229,25 @@ export function Sets({ id }: { id?: string }) {
                       <span className="font-mono text-lg font-bold">
                         {pad.from} → {pad.to}
                       </span>
-                      <span className="text-sm text-muted">way in</span>
-                      {pad.way.map((key, k) => (
-                        <span key={`${key}-${k}`} className="rounded border border-faint bg-white px-1.5 py-0.5 font-mono text-xs">
-                          {key}
+                      <span className="text-sm text-muted">{way.picked ? 'your pads' : 'way in'}</span>
+                      {way.tonics.map((tonic, k) => (
+                        <span
+                          key={`${tonic}-${k}`}
+                          title={have.has(tonic) ? undefined : 'No pad in this key yet. Perform skips it.'}
+                          className={`rounded border bg-white px-1.5 py-0.5 font-mono text-xs ${have.has(tonic) ? 'border-faint' : 'border-dashed border-faint text-faint'}`}
+                        >
+                          {KEY_NAMES[tonic]}
                         </span>
                       ))}
+                      <button
+                        type="button"
+                        aria-expanded={picking === gap}
+                        aria-label={`${picking === gap ? 'Done picking' : 'Change'} the pads after ${song.title}`}
+                        className="text-sm text-muted underline underline-offset-2 hover:text-ink"
+                        onClick={() => setPicking(picking === gap ? null : gap)}
+                      >
+                        {picking === gap ? 'Done' : 'Change'}
+                      </button>
                       {!items[i + 1] && <span className="text-sm text-muted">played live · fade when ready</span>}
                       {!pad.note && (
                         <LinkButton className="ml-auto" onClick={() => go({ page: 'perform', setId: set.id, item: 2 * i + 1 })}>
@@ -227,12 +261,59 @@ export function Sets({ id }: { id?: string }) {
                         <LinkButton onClick={() => go({ page: 'perform', setId: set.id, item: 2 * i + 1 })}>Practice</LinkButton>
                       </div>
                     )}
+                    {picking === gap && <PadPicker song={song} next={items[i + 1]} way={way} have={have} onPick={tonics => pickPads(gap, tonics)} />}
                   </div>
                 </div>
               </li>
             );
           })}
         </ol>
+      </div>
+    </div>
+  );
+}
+
+/** Pick the pads for one gap. Each tap adds a pad to the end; the first comes in as the song ends. */
+function PadPicker(props: { song: Song; next: Song | undefined; way: { tonics: number[]; picked: boolean }; have: Set<number>; onPick: (tonics: number[] | null) => void }) {
+  const { way, have, onPick } = props;
+  const from = keyOf(songKeys(props.song)?.end) ?? { tonic: 0, minor: false };
+  const to = props.next ? keyOf(songKeys(props.next)?.start) : null;
+  const groups = padGroups(from, to);
+  return (
+    <div className="mt-3 border-t border-faint pt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-muted">Plays</span>
+        {way.tonics.map((tonic, k) => (
+          <span key={`${tonic}-${k}`} className="inline-flex items-center gap-1 rounded border border-ink bg-white py-0.5 pl-2 pr-1 font-mono text-sm">
+            {KEY_NAMES[tonic]}
+            {way.tonics.length > 1 && (
+              <button type="button" className="rounded p-0.5 text-faint hover:bg-paper hover:text-ink" aria-label={`Take out pad ${k + 1}, ${KEY_NAMES[tonic]}`} onClick={() => onPick(way.tonics.filter((_, j) => j !== k))}>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </span>
+        ))}
+        {way.picked && (
+          <LinkButton className="ml-auto text-sm" onClick={() => onPick(null)}>
+            Use the suggested way in
+          </LinkButton>
+        )}
+      </div>
+      <p className="mt-3 text-sm text-muted">Tap a pad to add it to the end. The first one comes in as the song ends.</p>
+      <div className="mt-2 grid grid-cols-[repeat(auto-fill,minmax(8rem,1fr))] gap-2">
+        {[...groups.both, ...groups.from, ...groups.to, ...groups.other].map(tonic => (
+          <button
+            key={tonic}
+            type="button"
+            disabled={!have.has(tonic)}
+            aria-label={`Add pad ${KEY_NAMES[tonic]}, ${padFit(tonic, from, to)}`}
+            className="rounded-md border border-line bg-white px-3 py-2 text-left hover:border-ink disabled:cursor-not-allowed disabled:border-dashed disabled:opacity-50"
+            onClick={() => onPick([...way.tonics, tonic])}
+          >
+            <span className="block font-mono text-lg font-bold">{KEY_NAMES[tonic]}</span>
+            <span className="block text-xs text-muted">{have.has(tonic) ? padFit(tonic, from, to) : 'no pad yet'}</span>
+          </button>
+        ))}
       </div>
     </div>
   );

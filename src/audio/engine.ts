@@ -250,6 +250,8 @@ interface Segment {
   gapPad?: Promise<PadVoice | null>;
   /** Shared with the previous segment when the recording runs straight on into this one. */
   voice: Voice;
+  /** A pad under the song has been told about this section's key. */
+  keyed?: boolean;
 }
 
 type Planned = { idx: number; pass: number; reason: Reason; boundaryAudio: number } | 'end' | null;
@@ -327,6 +329,10 @@ export class PerformSession {
   jumpFade: JumpFade = 'edited';
   /** Bring in a pad in the new section's key when a jump would leave silence. */
   fillGaps = false;
+  /** A pad is under the song, and changes to each new section's key as it lands. */
+  under = false;
+  /** How long a pad takes to change into another pad. */
+  padCrossfade: 'beat' | 'bar' | 'bars' = 'beat';
   padSource: PadSource;
   pads: PadVoice[] = [];
   private fading: PadVoice[] = [];
@@ -442,6 +448,7 @@ export class PerformSession {
     this.endAt = null;
     this.forced = false;
     this.only = only;
+    this.under = false;
   }
 
   pickSection(idx: number) {
@@ -572,7 +579,50 @@ export class PerformSession {
     const pos = current.landingAudio + Math.max(0, now() - current.landingCtx);
     const boundary = nextBoundary('phrase', pos + 0.05, view, ps.grid, current.seamAudio);
     const at = current.landingCtx + (boundary - current.landingAudio);
+    this.under = true;
     void this.setPad(tonic, at, 2 * barSeconds(ps.grid, view.s));
+  }
+
+  /** Bring in or change the pad under the song on its next bar line or beat. The next new section brings its own key. */
+  changePadUnder(tonic: number, rule: 'beat' | 'bar') {
+    const ps = this.ps;
+    const current = this.segments[0];
+    if (!ps || !current) return;
+    const view = ps.views[current.idx];
+    const pos = current.landingAudio + Math.max(0, now() - current.landingCtx);
+    const end = pos > current.seamAudio - 0.01 ? ps.buffer.duration : current.seamAudio;
+    const boundary = nextBoundary(rule, pos + 0.05, view, ps.grid, end);
+    const at = Math.max(now(), current.landingCtx + (boundary - current.landingAudio));
+    // A section landing by then would take the key back at once.
+    for (const segment of this.segments) if (segment.landingCtx <= at + 0.01) segment.keyed = true;
+    this.under = true;
+    void this.setPad(tonic, at, this.padFadeSeconds());
+  }
+
+  private padFadeSeconds(): number {
+    const bar = this.barLen();
+    const beats = this.ps?.song.beatsPerBar ?? this.clock?.beatsPerBar ?? 4;
+    return this.padCrossfade === 'beat' ? bar / beats : this.padCrossfade === 'bar' ? bar : 2 * bar;
+  }
+
+  /**
+   * A pad under the song changes to the key of each new section as it lands. It waits until the section can no
+   * longer be taken back, so a pick or cancel never leaves the pad in the wrong key. A repeat keeps a key you tapped.
+   */
+  private followKeys(t: number) {
+    const ps = this.ps!;
+    for (let k = 1; k < this.segments.length; k++) {
+      const segment = this.segments[k];
+      if (segment.keyed || t + 0.03 < Math.min(segment.startCtx, segment.prevFadeCtx) || t < segment.landingCtx - 0.5) continue;
+      const pad = this.pads[0];
+      // No pad under the song yet: look again next tick, so one brought in just before the landing still follows.
+      if (!this.under || !pad) continue;
+      segment.keyed = true;
+      const tonic = keyOf(ps.views[segment.idx].key)?.tonic;
+      if (tonic !== undefined && tonic !== pad.tonic && segment.idx !== this.segments[k - 1].idx) {
+        void this.setPad(tonic, segment.landingCtx, this.padFadeSeconds());
+      }
+    }
   }
 
   /** Leave the song for the pad: from the next bar line the pad rises over `bars` as the song fades out. A pad already in stays. */
@@ -587,12 +637,14 @@ export class PerformSession {
     const boundary = nextBoundary('bar', pos + 0.05, view, ps.grid, end);
     const at = Math.max(now(), current.landingCtx + (boundary - current.landingAudio));
     if (this.pads.length === 0) void this.setPad(tonic, at, bars * barSeconds(ps.grid, view.s));
+    this.under = false;
     this.endSong(bars, at);
   }
 
   /** `all` also shortens pads already fading, such as one kept under a new song, so they are gone by `end`. */
   fadePads(start: number, end: number, all = false) {
     this.padTicket++;
+    this.under = false;
     for (const pad of all ? [...this.pads, ...this.fading.filter(item => item.until > end + 0.1)] : this.pads) {
       fadeTo(pad, 0, start, end);
       pad.until = end + 0.1;
@@ -730,6 +782,7 @@ export class PerformSession {
     // Each one holds a decoded song.
     if (this.tails.some(tail => tail.end <= t)) this.tails = this.tails.filter(tail => tail.end > t);
     if (!ps || this.segments.length === 0) return;
+    this.followKeys(t);
     while (this.segments.length > 1 && t >= this.segments[1].landingCtx) {
       const old = this.segments.shift()!;
       if (old.voice === this.segments[0].voice) continue;
@@ -785,6 +838,7 @@ export class PerformSession {
     this.planned = null;
     this.endAt = null;
     this.ps = null;
+    this.under = false;
     this.onSongEnd?.();
   }
 

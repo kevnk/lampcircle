@@ -76,5 +76,7 @@ export interface WorshipSet {
   id: string;
   name: string;
   songIds: string[];
+  /** Pads you picked for the gap after a song, in play order, keyed by `gapKey`. A gap without one plays the suggested way in. */
+  pads?: Record<string, number[]>;
   updatedAt: number;
 }

@@ -85,6 +85,18 @@ export function padGroups(from: MusicKey, to: MusicKey | null): PadGroups {
   return groups;
 }
 
+/** Where a pad sits in the key you leave and the key you need, like "V in A · I in D". */
+export function padFit(pad: number, from: MusicKey, to: MusicKey | null): string {
+  const a = numeral(pad, from);
+  const b = to ? numeral(pad, to) : null;
+  const fromName = KEY_NAMES[from.tonic];
+  const toName = to ? KEY_NAMES[to.tonic] : '';
+  if (a && b) return `${a} in ${fromName} · ${b} in ${toName}`;
+  if (a) return `${a} in ${fromName}`;
+  if (b) return `${b} in ${toName}`;
+  return to ? 'outside both keys' : `outside ${fromName}`;
+}
+
 /** Pads from the key you left to the next song's key, ending on a V to I cadence. */
 export function route(from: MusicKey, to: MusicKey | null): number[] {
   if (!to || from.tonic === to.tonic) return [to?.tonic ?? from.tonic];

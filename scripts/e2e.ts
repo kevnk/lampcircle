@@ -454,6 +454,20 @@ async function main() {
     await click('Save set');
     await waitFor(`document.body.innerText.includes('Saved ✓')`, 'save set');
     await shot('5-sets');
+    // Pick the pads between two songs.
+    const setPads = `(async () => { const db = await new Promise(r => { const q = indexedDB.open('worship-looper'); q.onsuccess = () => r(q.result); }); const all = await new Promise(r => { const q = db.transaction('sets').objectStore('sets').getAll(); q.onsuccess = () => r(q.result); }); return JSON.stringify(Object.values(all[0].pads ?? {})); })()`;
+    await click('Change');
+    await clickAt(`document.querySelector('[aria-label^="Add pad E,"]')`);
+    await clickAt(`document.querySelector('[aria-label^="Add pad D,"]')`);
+    await clickAt(`document.querySelector('[aria-label="Take out pad 1, A"]')`);
+    await waitFor(`/your pads\\s*D\\s*E\\s*D\\s*Done/.test(document.querySelector('ol li').innerText)`, 'picked pads replace the way in');
+    await waitFor(`${setPads}.then(pads => pads === '[[2,4,2]]')`, 'the set keeps the picked pads');
+    await clickAt(`document.querySelectorAll('[aria-label^="Move "]')[1]`);
+    await press('ArrowUp');
+    await waitFor(`document.querySelector('ol li').innerText.includes('Evening Test') && !document.body.innerText.includes('your pads')`, 'new songs around a gap go back to its way in');
+    await press('ArrowDown');
+    await waitFor(`document.querySelector('ol li').innerText.includes('Morning Test') && document.body.innerText.includes('your pads')`, 'and the picked pads come back with the old order');
+    await shot('5b-sets-pads');
 
     // Import the .djw back; it re-downloads its source and keeps the map.
     await page.send('Page.navigate', { url: `http://localhost:${WEB}/#/library` });
@@ -471,9 +485,22 @@ async function main() {
     await page.send('Page.navigate', { url: `http://localhost:${WEB}/#/sets` });
     await waitFor(`document.body.innerText.includes('Practice')`, 'sets page');
     await click('Practice', 'button');
-    await waitFor(`document.body.textContent.includes('Now sounding') && __djw.session?.snapshot().pad`, 'practice opens a pad');
+    await waitFor(`document.body.textContent.includes('Now sounding') && __djw.session?.snapshot().pad?.tonic === 2`, 'practice opens on the first picked pad');
+    check('the set list and the pad grid show the picked pads', (await text()).includes('D · E · D') && (await text()).includes('Your pads, from Sets'));
+    await click('Simple');
+    check('simple mode waits on the last picked pad', (await text()).includes('then waits on D.'));
+    await waitFor(`__djw.session.snapshot().pad?.tonic === 4`, 'and walks on to the next picked pad', 15000);
+    await waitFor(`__djw.session.snapshot().pad?.tonic === 2`, 'and on to a key that comes back later', 15000);
+    await sleep(9000);
+    check('then stays on the last pad', await ev<boolean>(`__djw.session.snapshot().pad?.tonic === 2 && !__djw.session.snapshot().pad.next`));
+    await click('Advanced');
     await click('Exit');
     await click('Tap again to stop');
+    await waitFor(`document.body.innerText.includes('your pads')`, 'back on sets with picked pads');
+    await click('Change');
+    await click('Use the suggested way in');
+    await waitFor(`!document.body.innerText.includes('your pads') && /A → D\\s*way in\\s*A\\s*D/.test(document.querySelector('ol li').innerText)`, 'the suggested way in comes back');
+    await waitFor(`${setPads}.then(pads => pads === '[]')`, 'and the set forgets the picked pads');
 
     // Perform.
     await waitFor(`document.body.innerText.includes('Perform this set')`, 'back on sets');
@@ -543,6 +570,7 @@ async function main() {
     await click('Match the fade-out');
     await press('3');
     await waitFor(`/Next: Chorus 1 — at end of phrase \\(in \\d bars?\\)/.test(document.body.innerText)`, 'pick queues Chorus 1 at the phrase');
+    await ev(`document.querySelector('header').scrollIntoView()`);
     await shot('6-perform-song');
     await click('Cancel');
     await waitFor(`__djw.session.snapshot().song.next?.reason === 'plan' && __djw.session.snapshot().song.next.idx === 1`, 'cancel returns to the plan');
@@ -608,8 +636,15 @@ async function main() {
     await waitFor(`__djw.engine.audio().ctx.state === 'suspended'`, 'with Fade off, Pause stops at once', 300);
     await click('Resume');
     await waitFor(`__djw.engine.audio().ctx.state === 'running' && ${gain} > 0.99`, 'and Resume comes straight back', 300);
+    check('the pad under the song starts in the key of the section playing', (await text()).includes('Pad under the song (G)'));
     await click('Pad under the song');
-    await waitFor(`__djw.session.snapshot().pad?.tonic === 9 && __djw.session.snapshot().song`, 'pad comes in under the song', 12000);
+    await waitFor(`__djw.session.snapshot().pad?.tonic === 7 && __djw.session.snapshot().song`, 'pad comes in under the song', 12000);
+    await clickAt(`document.querySelector('[aria-label^="Pad under the song in D"]')`);
+    await waitFor(`__djw.session.snapshot().pad?.tonic === 2 && !__djw.session.snapshot().pad.next && __djw.session.snapshot().song`, 'a key you tap changes the pad under the song', 8000);
+    await press('5');
+    await waitFor(`__djw.session.snapshot().song.idx === 4 && __djw.session.snapshot().pad?.tonic === 9`, 'and the next section brings its own key', 12000);
+    const keyChange = await ev<number>(`(() => { const s = __djw.session; return Math.abs(s.pads[0].at - s.segments[0].landingCtx); })()`);
+    check('the pad changes key as the section lands', keyChange < 0.1, keyChange);
     await click('Turn pad off');
     await waitFor(`!__djw.session.snapshot().pad && ${find('Pad under the song')} && __djw.session.snapshot().song && !__djw.session.snapshot().song.ending`, 'the pad turns off and the song plays on');
     await click('Go to pad (A)');
