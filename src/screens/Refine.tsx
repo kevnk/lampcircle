@@ -40,9 +40,9 @@ export function Refine({ song }: { song: Song }) {
           <StepPills current={['refine']} done={doneSteps(song)} onStep={stepNav(song)} />
         </SongHeader>
         <Card className="p-6">
-          <p className="mb-4">Mark the sections first. Refine shapes each one.</p>
+          <p className="mb-4">Map the song first, then set how each section loops and fades.</p>
           <Button tone="primary" onClick={() => go({ page: 'song', id: song.id, step: 'tap' })}>
-            Mark sections
+            Map Song
           </Button>
         </Card>
       </div>

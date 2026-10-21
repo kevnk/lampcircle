@@ -43,8 +43,7 @@ export function stepNav(song: Song) {
 
 export function doneSteps(song: Song): StepName[] {
   return [
-    ...(song.taps.length >= 8 ? (['tap'] as const) : []),
-    ...(song.sections.length ? (['sections'] as const) : []),
+    ...(song.sections.length ? (['tap'] as const) : []),
     ...(song.refined ? (['refine'] as const) : []),
     ...(song.exportedAt ? (['export'] as const) : []),
   ];
@@ -422,7 +421,7 @@ export function SongTap({ song }: { song: Song }) {
           </table>
           <div className="mt-6 flex justify-end">
             <Button tone="primary" onClick={() => go({ page: 'song', id: song.id, step: 'refine' })} disabled={views.length === 0}>
-              Next: Refine
+              Next: Transitions
             </Button>
           </div>
         </Card>
@@ -530,7 +529,7 @@ function SectionInspector({ song, view, save, loaded, onRetap, onClose }: Edit &
             label={pickupBeats ? `${beatsLabel(pickupBeats)} early` : 'on the 1'}
             onChange={value => save(patched(song, view, { pickupBeats: value }))}
           />
-          <p className="mt-1.5 text-xs text-muted">Earlier for a sung pickup. The same setting as Fade in ends in Refine.</p>
+          <p className="mt-1.5 text-xs text-muted">Earlier for a sung pickup. The same setting as Fade in ends in Transitions.</p>
         </div>
         <span className="text-muted">Key</span>
         <div>

@@ -401,7 +401,7 @@ export function nextStep(song: Song, inSet: boolean): Step {
 export const STEP_LABEL: Record<Step, string> = {
   tap: 'Tap in',
   sections: 'Mark sections',
-  refine: 'Refine',
+  refine: 'Transitions',
   export: 'Export .djw',
   set: 'Add to set',
   done: 'Open set',

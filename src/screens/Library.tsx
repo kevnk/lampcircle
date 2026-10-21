@@ -180,7 +180,7 @@ export function Library() {
             <Label className="mb-2">Sections</Label>
             <MiniStrip views={sectionViews(selected)} />
             <Button className="mt-5 w-full" onClick={() => go({ page: 'song', id: selected.id, step: 'tap' })}>
-              Open in Tap &amp; section
+              Open in Map Song
             </Button>
           </Card>
         )}

@@ -321,8 +321,8 @@ async function main() {
     await seek(28.3);
     await shot('2-tap-sections');
 
-    // Refine.
-    await click('Next: Refine');
+    // Transitions.
+    await click('Next: Transitions');
     await waitFor(`document.body.innerText.includes('Loop seam')`, 'refine screen');
     await clickAt(`[...document.querySelectorAll('[role=option]')].find(b => b.textContent.startsWith('Chorus 1'))`);
     await waitFor(`document.body.innerText.includes('Chorus 1 · bars 9–12')`, 'select Chorus 1');
@@ -431,7 +431,7 @@ async function main() {
     await click('More');
     await click('Run Chorus to the end');
     await waitFor(`document.body.innerText.includes('60.0 BPM')`, 'evening tempo 60 BPM');
-    await click('Next: Refine');
+    await click('Next: Transitions');
     await click('Next: Export .djw');
     await waitFor(`document.body.innerText.includes('Ready: all 4 checks pass')`, 'evening passes checks');
     const savedB = chrome.browser.once('Browser.downloadProgress', p => p.state === 'completed');
@@ -734,7 +734,7 @@ async function migrateFromV1() {
     await page.send('Page.navigate', { url: `http://localhost:${WEB}/#/sets` });
     await waitFor(`document.querySelector('input[aria-label="Set name"]')?.value === 'Set list' && document.body.innerText.includes('Old Song')`, 'the v1 set list becomes a set');
     await page.send('Page.navigate', { url: `http://localhost:${WEB}/#/song/v1song/refine` });
-    await waitFor(`document.body.innerText.includes('Chorus · bars 5–9') || [...document.querySelectorAll('[role=option]')].some(b => b.textContent.startsWith('Chorus'))`, 'its sections open in Refine');
+    await waitFor(`document.body.innerText.includes('Chorus · bars 5–9') || [...document.querySelectorAll('[role=option]')].some(b => b.textContent.startsWith('Chorus'))`, 'its sections open in Transitions');
     await page.send('Page.navigate', { url: `http://localhost:${WEB}/#/song/v1song/tap` });
     await waitFor(`Math.abs((__djw.engine.transport.buffer?.duration ?? 0) - 33.25) < 0.01`, 'its audio moved to the audio store and still plays');
   } catch (error) {

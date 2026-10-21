@@ -27,7 +27,7 @@ const PAUSE_FADE = { out: 3, in: 2 };
 const JUMP_FADES: Array<[JumpFade, string, string]> = [
   ['out', 'Match the fade-out', 'The section you pick fades in where this one fades out.'],
   ['in', 'Match the fade-in', 'This section fades out where the one you pick fades in.'],
-  ['edited', 'As edited', 'Each section keeps the fades you set in Refine.'],
+  ['edited', 'As edited', 'Each section keeps the fades you set in Transitions.'],
 ];
 
 const option = (active: boolean) => `rounded-md border px-3.5 py-2.5 ${active ? 'border-stage-text bg-stage-text text-stage-bg' : 'border-stage-line hover:bg-stage-card'}`;

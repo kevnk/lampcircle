@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { Fragment, useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { Check, ChevronDown, ChevronRight } from 'lucide-react';
 import type { Song } from './types';
 import { shadeOf, type SectionView, type Shade } from './lib/songMap';
 
@@ -126,16 +126,16 @@ export function shadeClass(view: SectionView): string {
   return SHADE[shadeOf(view.section.type)];
 }
 
-/** The small strip on Library: one block per section, sized by bars. */
+/** The small strip on Library: one block per section, sized by bars, wrapping onto more rows for long songs. */
 export function MiniStrip({ views }: { views: SectionView[] }) {
   if (views.length === 0) return <p className="text-sm text-muted">No sections yet.</p>;
   return (
-    <div className="flex h-7 gap-px" aria-label={`Sections: ${views.map(view => view.name).join(', ')}`}>
+    <div className="flex flex-wrap gap-x-px gap-y-1" aria-label={`Sections: ${views.map(view => view.name).join(', ')}`}>
       {views.map(view => (
         <div
           key={view.section.id}
-          className={`flex min-w-[1.25rem] items-center justify-center overflow-hidden font-mono text-[11px] ${shadeClass(view)}`}
-          style={{ flexGrow: view.e - view.s }}
+          className={`flex h-7 min-w-fit items-center justify-center px-1.5 font-mono text-[11px] ${shadeClass(view)}`}
+          style={{ width: `${(view.e - view.s) * 0.25}rem` }}
           title={view.name}
         >
           {view.short}
@@ -149,29 +149,27 @@ export type StepName = 'tap' | 'sections' | 'refine' | 'export';
 
 export function StepPills({ current, done, onStep }: { current: StepName[]; done: StepName[]; onStep: (step: StepName) => void }) {
   const steps: Array<[StepName, string]> = [
-    ['tap', '1 Tap'],
-    ['sections', '2 Sections'],
-    ['refine', '3 Refine'],
-    ['export', '4 Export'],
+    ['tap', 'Map Song'],
+    ['refine', 'Transitions'],
+    ['export', 'Export'],
   ];
   return (
-    <nav className="flex flex-wrap gap-2" aria-label="Steps">
-      {steps.map(([step, label]) => {
-        const style = current.includes(step)
-          ? 'bg-accent text-white'
-          : done.includes(step)
-            ? 'bg-ink text-white'
-            : 'border border-dashed border-faint text-muted hover:text-ink';
+    <nav className="flex flex-wrap items-center gap-1.5" aria-label="Steps">
+      {steps.map(([step, label], index) => {
+        const here = current.includes(step);
         return (
-          <button
-            key={step}
-            type="button"
-            aria-current={current.includes(step) ? 'step' : undefined}
-            className={`rounded-full px-3.5 py-1.5 text-sm ${style}`}
-            onClick={() => onStep(step)}
-          >
-            {label}
-          </button>
+          <Fragment key={step}>
+            {index > 0 && <ChevronRight className="h-4 w-4 text-faint" aria-hidden />}
+            <Button
+              tone={here ? 'primary' : 'outline'}
+              aria-current={here ? 'step' : undefined}
+              className={`px-3.5 py-2 text-sm ${here ? 'border border-transparent' : ''}`}
+              onClick={() => onStep(step)}
+            >
+              {done.includes(step) && !here && <Check className="h-4 w-4" role="img" aria-label="Done" />}
+              {label}
+            </Button>
+          </Fragment>
         );
       })}
     </nav>
