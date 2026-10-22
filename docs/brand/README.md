@@ -19,12 +19,22 @@ Everything in the app comes from one file: [logo.png](logo.png). The navy lanter
 | `brand/logo.webp` | The whole logo, unchanged | Sidebar, light mode |
 | `brand/logo-dark.webp` | The whole logo, wordmark in cream | Sidebar, dark mode |
 | `brand/mark.webp` | The lantern, bars and ring, without the wordmark | Not in the app today. Use it where the mark appears without the wordmark |
-| `favicon.ico` | The lantern on a cream rounded square, at 16, 32 and 48 px | Browser tab |
+| `favicon.ico` | The lantern on a cream rounded square, at 48, 32 and 16 px, sharpened | Browser tab in Chrome (it picks the frame that matches exactly), PDF and image tabs in Safari |
+| `favicon.svg` | The same, as a 256 px PNG inside an SVG | Browser tab in Firefox and Safari 26, and any size the ICO lacks |
+| `favicon-96x96.png` | The same, 96 px | Android Chrome, and browsers without SVG icons |
 | `apple-touch-icon.png` | The mark on cream, 180 px | iPhone and iPad home screen |
 | `icon-192.png`, `icon-512.png` | The mark on cream | Installed app (`manifest.webmanifest`) |
 | `icon-maskable-512.png` | The mark on cream, inside the safe circle | Android adaptive icon |
 
-To remake them, crop `logo.png` and keep its alpha channel. The mark is the box (400, 117)–(1136, 700). The whole logo is (161, 117)–(1374, 877).
+To remake them, crop `logo.png` and keep its alpha channel. The mark is the box (400, 117)–(1136, 700). The whole logo is (161, 117)–(1374, 877). The lantern is (622, 114)–(909, 606), which stops just short of the innermost sound bars.
+
+`sh scripts/favicons.sh` remakes the three tab icons (it needs ImageMagick 7). After remaking them, raise the `?v=` number on their links in `index.html`. Chrome keeps a favicon it has already stored until its URL changes. It follows RealFaviconGenerator and adds a few things for crispness:
+
+- Every size is shrunk from one 1024 px master with Lanczos, so the tile corners are smooth. The old ICO had on-off alpha, which made jagged corners.
+- The 16, 32 and 48 px frames get a light sharpen, on color only.
+- Fully transparent pixels hold cream instead of black, so a browser that scales the icon shows no dark fringe.
+- The ICO has a frame for each common tab size, so Chrome never has to scale one. When Chrome must enlarge a frame by a whole multiple (16 to 32 px, say), it uses nearest-neighbor, which looks blocky.
+- The SVG lets Firefox and Safari draw the icon at any size. They shrink its 256 px image themselves, so it looks a little softer than the sharpened frames.
 
 ## Color
 
