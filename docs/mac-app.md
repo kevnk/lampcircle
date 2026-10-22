@@ -35,7 +35,9 @@ npm test && npm run e2e && npm run build    # the web app, unchanged
 
 `src/platform/` is the seam. `platform.helper` and `platform.saveText` pick the browser or the Mac version. Code that only the Mac app runs uses `desktop`, and only `src/desktop/` touches it. Keep `server/index.js` and `downloads.rs` in step when either changes.
 
-**Your library does not carry over.** Songs you added in Chrome stay in Chrome. There is no library-wide export yet, so the app starts empty.
+**Moving your library from Chrome.** The app starts empty, since it has its own IndexedDB. In the web app in Chrome, open Library and choose More › Export library. That saves one `.lampcircle` file with every song, pad, set and recording.
+
+In the Mac app, choose More › Import library and pick that file. Import only adds what the app doesn't have yet, so importing twice is safe. Export is only in the web app for now.
 
 **yt-dlp and ffmpeg come from Homebrew.** An app opened from Finder gets a bare PATH, so the app adds `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin` for yt-dlp. That is also how yt-dlp finds ffmpeg and a JavaScript runtime. Without yt-dlp, a download says how to install it. `YT_DLP_PATH` points at a different yt-dlp.
 

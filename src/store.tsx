@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Pad, Song, WorshipSet } from './types';
 import * as db from './lib/db';
+import { unpackLibrary } from './lib/backup';
 import { analyzeBlob, helper, importJob, type Job } from './lib/library';
 import { uid } from './lib/songMap';
 
@@ -68,6 +69,8 @@ interface Store {
   removeSet: (id: string) => Promise<void>;
   newSet: () => WorshipSet;
   addToSet: (songId: string) => WorshipSet;
+  /** Adds what a library file has that this library does not, by id. Nothing here is changed. */
+  importLibrary: (file: Blob) => Promise<{ songs: number; pads: number; sets: number; audio: number }>;
   jobs: Job[];
   helperDown: boolean;
   refreshJobs: () => void;
@@ -89,6 +92,11 @@ function writeSoon(song: Song) {
   if (!flushTimer) flushTimer = window.setTimeout(flush, 400);
 }
 window.addEventListener('pagehide', flush);
+
+function fresh<T extends { id: string }>(items: T[], have: T[]): T[] {
+  const ids = new Set(have.map(item => item.id));
+  return items.filter(item => !ids.has(item.id));
+}
 
 export function useStore(): Store {
   const store = useContext(StoreContext);
@@ -219,6 +227,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const next = set.songIds.includes(songId) ? set : { ...set, songIds: [...set.songIds, songId] };
         saveSet(next);
         return next;
+      },
+      importLibrary: async file => {
+        const backup = await unpackLibrary(file);
+        const added = { songs: [] as Song[], pads: [] as Pad[], sets: [] as WorshipSet[], audio: 0 };
+        // Recordings first, so a song is never stored without its audio. If it stops part way, show what was stored.
+        try {
+          for (const [id, blob] of backup.audio) {
+            if (await db.getAudio(id)) continue;
+            // WebKit stores a slice of a picked file as the whole file, so store a copy of just its bytes.
+            await db.putAudio(id, new Blob([await blob.arrayBuffer()], { type: blob.type }));
+            added.audio++;
+          }
+          for (const song of fresh(backup.songs, songs)) await db.putSong(song).then(() => added.songs.push(song));
+          for (const pad of fresh(backup.pads, pads)) await db.putPad(pad).then(() => added.pads.push(pad));
+          for (const set of fresh(backup.sets, sets)) await db.putSet(set).then(() => added.sets.push(set));
+        } finally {
+          setSongs(list => [...list, ...fresh(added.songs, list)].sort((a, b) => b.addedAt - a.addedAt));
+          setPads(list => [...list, ...fresh(added.pads, list)].sort((a, b) => a.tonic - b.tonic));
+          setSets(list => [...list, ...fresh(added.sets, list)].sort((a, b) => b.updatedAt - a.updatedAt));
+        }
+        return { songs: added.songs.length, pads: added.pads.length, sets: added.sets.length, audio: added.audio };
       },
       jobs: jobs.map(job => (failed.has(job.id) ? { ...job, status: 'error' as const, error: failed.get(job.id) } : job)),
       helperDown,

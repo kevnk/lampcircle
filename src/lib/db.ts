@@ -69,10 +69,10 @@ export async function loadAll(): Promise<{ songs: Song[]; pads: Pad[]; sets: Wor
   };
 }
 
-export const putSong = async (song: Song) => void (await db()).put('songs', song);
-export const putPad = async (pad: Pad) => void (await db()).put('pads', pad);
-export const putSet = async (set: WorshipSet) => void (await db()).put('sets', set);
-export const putAudio = async (id: string, blob: Blob) => void (await db()).put('audio', blob, id);
+export const putSong = async (song: Song) => void (await (await db()).put('songs', song));
+export const putPad = async (pad: Pad) => void (await (await db()).put('pads', pad));
+export const putSet = async (set: WorshipSet) => void (await (await db()).put('sets', set));
+export const putAudio = async (id: string, blob: Blob) => void (await (await db()).put('audio', blob, id));
 export const getAudio = async (id: string) => (await db()).get('audio', id);
 
 export async function removeSong(id: string, sets: WorshipSet[]) {

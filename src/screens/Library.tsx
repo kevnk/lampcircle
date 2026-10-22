@@ -2,12 +2,16 @@ import { useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from 
 import { Play, Square, Trash2 } from 'lucide-react';
 import type { Song } from '../types';
 import { go, useStore } from '../store';
-import { Button, Card, Label, LinkButton, MiniStrip, RestingBars } from '../ui';
+import { Button, Card, Label, LinkButton, Menu, MenuItem, MiniStrip, RestingBars } from '../ui';
 import { PAD_ALBUM, helper, importPad, importSong, jobKind, queueLink, splitTitle, type Job } from '../lib/library';
 import { parseDjw, type DjwMap } from '../lib/djw';
 import { KEY_NAMES } from '../lib/music';
 import { STEP_LABEL, bpmOf, clock, keysText, nextStep, sectionViews, songGrid, songKeys, type Step } from '../lib/songMap';
 import { transport } from '../audio/engine';
+import { getAudio } from '../lib/db';
+import { libraryFileName, packLibrary } from '../lib/backup';
+import { isTauri } from '../platform';
+import { download } from '../platform/browser';
 
 export function Library() {
   const store = useStore();
@@ -19,6 +23,8 @@ export function Library() {
   const [waiting, setWaiting] = useState<DjwMap | null>(null);
   const djwInput = useRef<HTMLInputElement>(null);
   const audioInput = useRef<HTMLInputElement>(null);
+  const libraryInput = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
 
   const shown = useMemo(() => {
     const words = query.toLowerCase().trim();
@@ -76,13 +82,50 @@ export function Library() {
     setWaiting(map);
   };
 
+  // ponytail: no export in the Mac app yet. Its save_text takes a string, and a library is hundreds of MB.
+  const exportLibrary = async () => {
+    const audio: Array<[string, Blob]> = [];
+    for (const { id } of [...songs, ...pads]) {
+      const blob = await getAudio(id);
+      if (blob) audio.push([id, blob]);
+    }
+    download(packLibrary({ songs, pads, sets, audio }), libraryFileName());
+  };
+
+  const importLibrary = async (file: File) => {
+    setImporting(true);
+    setNotice('Importing your library…');
+    try {
+      const added = await store.importLibrary(file);
+      const counts = ([[added.songs, 'song'], [added.pads, 'pad'], [added.sets, 'set'], [added.audio, 'recording']] as const)
+        .filter(([count]) => count > 0)
+        .map(([count, word]) => `${count} ${word}${count === 1 ? '' : 's'}`);
+      const list = counts.length > 1 ? `${counts.slice(0, -1).join(', ')} and ${counts[counts.length - 1]}` : counts[0];
+      setNotice(list ? `Added ${list}.` : 'Nothing new to add. Everything in that file is already in your library.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : `Could not read ${file.name}.`);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
     <div>
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-4xl font-extrabold tracking-tight">Library</h1>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           <Button onClick={() => djwInput.current?.click()}>Import .djw</Button>
           <Button onClick={() => go({ page: 'sets', id: store.newSet().id })}>New set</Button>
+          <Menu label="More">
+            {!isTauri() && (
+              <MenuItem onClick={() => void exportLibrary()} disabled={!songs.length && !pads.length && !sets.length}>
+                Export library
+              </MenuItem>
+            )}
+            <MenuItem onClick={() => libraryInput.current?.click()} disabled={importing}>
+              Import library
+            </MenuItem>
+          </Menu>
         </div>
         <input
           ref={djwInput}
@@ -92,6 +135,18 @@ export function Library() {
           aria-label="Import a .djw map"
           onChange={event => {
             if (event.target.files) void addFiles(event.target.files);
+            event.target.value = '';
+          }}
+        />
+        <input
+          ref={libraryInput}
+          type="file"
+          accept=".lampcircle"
+          className="hidden"
+          aria-label="Import a library"
+          onChange={event => {
+            const file = event.target.files?.[0];
+            if (file) void importLibrary(file);
             event.target.value = '';
           }}
         />

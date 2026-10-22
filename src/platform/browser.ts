@@ -36,12 +36,17 @@ export const browserPlatform: Platform = {
     },
   },
   async saveText(text, fileName) {
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/yaml' }));
-    const link = Object.assign(document.createElement('a'), { href: url, download: fileName });
-    document.body.append(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    download(new Blob([text], { type: 'text/yaml' }), fileName);
     return true;
   },
 };
+
+/** A browser download of a file the app made. */
+export function download(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = Object.assign(document.createElement('a'), { href: url, download: fileName });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

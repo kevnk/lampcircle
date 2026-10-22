@@ -481,6 +481,17 @@ async function main() {
       sectionViews(song).map(v => [v.name, v.s, v.e, v.key, v.section.pickupBeats, v.section.fadeInBeats, v.section.fadeOutBeats, v.section.repeats, v.section.jumpAt]);
     check('the re-imported map matches the original section by section', JSON.stringify(shape(both[0])) === JSON.stringify(shape(both[1])), [shape(both[0]), shape(both[1])]);
 
+    // Export the whole library, then import it back over itself.
+    const savedLibrary = chrome.browser.once('Browser.downloadProgress', p => p.state === 'completed');
+    await click('More');
+    await click('Export library');
+    await savedLibrary;
+    libraryFile = join(downloads, readdirSync(downloads).find(name => name.endsWith('.lampcircle')) ?? '');
+    check('library file name', /\/lampcircle-library-\d{4}-\d\d-\d\d\.lampcircle$/.test(libraryFile), libraryFile);
+    await setFiles('input[aria-label="Import a library"]', [libraryFile]);
+    await waitFor(`document.body.innerText.includes('Nothing new to add. Everything in that file is already in your library.')`, 'importing the library over itself adds nothing and says so');
+    check('and the library is unchanged', (await text()).includes('Songs · 3') && (await text()).includes('Pads · 12 keys'));
+
     // Practice a pad.
     await page.send('Page.navigate', { url: `http://localhost:${WEB}/#/sets` });
     await waitFor(`document.body.innerText.includes('Practice')`, 'sets page');
@@ -692,10 +703,35 @@ async function main() {
     await waitFor(`location.hash.startsWith('#/sets')`, 'exit returns to Sets');
     check('no page errors', errors.length === 0, errors);
     await migrateFromV1();
+    await importLibraryFresh();
   } catch (error) {
     await shot('failure').catch(() => {});
     console.log(`FAIL ${error instanceof Error ? error.message : error}`);
     process.exitCode = 1;
+  } finally {
+    await close(chrome);
+  }
+}
+
+let libraryFile = '';
+
+/** A fresh profile, like the Mac app on first launch, takes in the library file exported above. */
+async function importLibraryFresh() {
+  const chrome = await launch();
+  try {
+    page = await openPage(chrome);
+    await page.send('Page.navigate', { url: `http://localhost:${WEB}/#/library` });
+    await waitFor(`document.body.innerText.includes('Songs · 0')`, 'a fresh library starts empty');
+    await setFiles('input[aria-label="Import a library"]', [libraryFile]);
+    await waitFor(`document.body.innerText.includes('Added 3 songs, 12 pads, 1 set and 15 recordings.')`, 'importing the library file adds every song, pad, set and recording');
+    check('they show without a reload', (await text()).includes('Songs · 3') && (await text()).includes('Evening Test'));
+    await click('Open in Map Song');
+    await waitFor(`__djw.engine.transport.buffer?.duration > 1`, 'an imported song plays its imported audio');
+    await page.send('Page.navigate', { url: `http://localhost:${WEB}/#/sets` });
+    await waitFor(`document.querySelector('input[aria-label="Set name"]')?.value === 'Sunday · Test' && document.body.innerText.includes('2 songs · 2 pads')`, 'the set comes across with its songs');
+  } catch (error) {
+    await shot('failure-library').catch(() => {});
+    throw error;
   } finally {
     await close(chrome);
   }

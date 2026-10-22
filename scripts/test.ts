@@ -248,6 +248,31 @@ const v1 = djw.parseDjw(readFileSync(new URL('../way-maker.sample.djw', import.m
 same('djw v1 title', v1.title, 'Way Maker');
 same('djw v1 parts become sections', v1.sections.slice(0, 2).map(x => [x.type, x.at, x.pickupBeats]), [['intro', 3.2, 0], ['verse', 17.33, 1]]);
 
+// Library file round trip.
+const backup = await import('../src/lib/backup.ts');
+const packed = backup.packLibrary({
+  songs: [{ id: 's1', title: 'Way Maker', taps: [{ t: 1.5, one: true }] }, { id: 's2', title: 'Gratitude', taps: [] }],
+  pads: [{ id: 'p1', title: 'D Pad', tonic: 2 }],
+  sets: [{ id: 'set1', name: 'Sunday', songIds: ['s2', 's1'] }],
+  audio: [
+    ['s1', new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/mpeg' })],
+    ['s2', new Blob([new Uint8Array([0, 255])], { type: 'audio/wav' })],
+    ['p1', new Blob([new Uint8Array([9, 8, 7, 6])], { type: 'audio/mpeg' })],
+  ],
+} as never);
+const unpacked = await backup.unpackLibrary(packed);
+same('library file keeps every record', [unpacked.songs, unpacked.pads, unpacked.sets], [
+  [{ id: 's1', title: 'Way Maker', taps: [{ t: 1.5, one: true }] }, { id: 's2', title: 'Gratitude', taps: [] }],
+  [{ id: 'p1', title: 'D Pad', tonic: 2 }],
+  [{ id: 'set1', name: 'Sunday', songIds: ['s2', 's1'] }],
+]);
+const bytes = await Promise.all(unpacked.audio.map(async ([id, blob]) => [id, blob.type, [...new Uint8Array(await blob.arrayBuffer())]]));
+same('library file keeps every recording, byte for byte', bytes, [['s1', 'audio/mpeg', [1, 2, 3]], ['s2', 'audio/wav', [0, 255]], ['p1', 'audio/mpeg', [9, 8, 7, 6]]]);
+const problem = (file: Blob) => backup.unpackLibrary(file).then(() => 'read', error => error.message);
+same('a file that is not a library says so', await problem(new Blob(['{"songs": []}'])), 'This is not a Lampcircle library file.');
+same('a library file cut short says so', await problem(packed.slice(0, packed.size - 1)), 'This library file is incomplete. Export it again.');
+same('library file name', backup.libraryFileName(new Date(2026, 9, 21)), 'lampcircle-library-2026-10-21.lampcircle');
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);
