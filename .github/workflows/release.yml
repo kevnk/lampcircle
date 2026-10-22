@@ -117,6 +117,12 @@ jobs:
 
       - run: npm ci
 
+      # rust-cache restores src-tauri/target, and with it any bundles an earlier build left there. A
+      # release run once verified a half-built Lampcircle.app from before the rename instead of the
+      # Lamp Circle.app it had just built. Clear the bundle directory so it holds only this build's.
+      - name: Clear bundles restored from the cache
+        run: rm -rf src-tauri/target/universal-apple-darwin/release/bundle
+
       - name: Build signed and notarized Tauri updater release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -152,16 +158,27 @@ jobs:
             exit 1
           fi
 
-          app=$(find "$bundle_dir" -type d -name '*.app' -print -quit)
+          # Expect exactly one of each, so a leftover bundle can never be checked in place of this
+          # run's. -prune keeps find out of the .app itself, so nothing nested inside it counts.
+          app=$(find "$bundle_dir" -type d -name '*.app' -prune)
           if [ -z "$app" ]; then
             echo "::error::No .app bundle was produced."
+            exit 1
+          elif [ "$(printf '%s\n' "$app" | wc -l)" -gt 1 ]; then
+            echo "::error::Found more than one .app bundle:"
+            printf '%s\n' "$app"
             exit 1
           fi
           codesign --verify --deep --strict --verbose=2 "$app"
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose=4 "$app"
 
-          archive=$(find "$bundle_dir" -type f -name '*.app.tar.gz' -print -quit)
+          archive=$(find "$bundle_dir" -type f -name '*.app.tar.gz')
+          if [ "$(printf '%s\n' "$archive" | wc -l)" -gt 1 ]; then
+            echo "::error::Found more than one updater archive:"
+            printf '%s\n' "$archive"
+            exit 1
+          fi
           if [ -z "$archive" ] || [ ! -s "$archive" ] || [ ! -s "$archive.sig" ]; then
             echo "::error::The signed Tauri updater archive or its .sig is missing or empty."
             exit 1
