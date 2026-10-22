@@ -1,5 +1,5 @@
-# Copy to config.toml locally (do not commit real URLs if sensitive).
+# Copy to config.toml for local builds. CI sets the same value in .github/workflows/release.yml.
 # Nested uses NESTED_FEEDBACK_URL; Lampcircle uses LAMPCIRCLE_FEEDBACK_URL.
 
 [env]
-LAMPCIRCLE_FEEDBACK_URL = "https://example.invalid/feedback"
+LAMPCIRCLE_FEEDBACK_URL = "https://lampcircle-feedback.fly.dev"

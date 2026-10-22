@@ -1,0 +1,168 @@
+# Builds the Mac app and publishes it as a GitHub Release whenever a version tag is pushed.
+# `npm run release -- 0.2.0` sets the version in package.json, tauri.conf.json and Cargo.toml; commit
+# that, then tag v0.2.0 and push the tag. This builds a universal (Apple silicon + Intel) .dmg and the
+# signed updater bundle, and attaches them with latest.json. Installed copies of Lampcircle find the
+# new version through the relay in feedback-relay/ the next time someone checks for updates.
+#
+# Running it by hand (Actions › Release › Run workflow) is a dry run: the same build, attached to a
+# draft release that installed copies never see. Delete that draft before you push the version's tag.
+#
+# Required repository secrets (Settings › Secrets and variables › Actions):
+#   TAURI_SIGNING_PRIVATE_KEY           the private half of the updater key (its public half is
+#                                       plugins.updater.pubkey in src-tauri/tauri.conf.json)
+#   APPLE_CERTIFICATE                   the base64-encoded Developer ID Application .p12
+#   APPLE_CERTIFICATE_PASSWORD          the .p12 export password
+#   APPLE_ID                            the Apple ID used for notarization
+#   APPLE_PASSWORD                      an app-specific password, not the Apple ID password
+#   APPLE_TEAM_ID                       the Apple Developer team ID
+#
+# Optional repository secrets:
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  the key's password. The key made for this repo has an empty
+#                                       one, so leave this secret unset: an unset secret reaches the
+#                                       build as an empty string, which is what that key expects.
+#   APPLE_SIGNING_IDENTITY              pins the Developer ID identity; Tauri can infer it when the
+#                                       imported certificate contains only one identity.
+#   APTABASE_APP_KEY                    (optional) the Aptabase app key for privacy-friendly analytics.
+#                                       When unset, all tracking is disabled.
+#
+# Tauri owns Apple signing, notarization, stapling, and updater artifact creation. Do not run a
+# separate notarytool submission or mutate the app after Tauri signs the updater archive.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One build per tag. A tag push that reaches Actions twice would otherwise start two builds, and
+# each signs its own bundle: whichever finishes last leaves the release holding one build's
+# .app.tar.gz beside the other's latest.json, so every updater rejects the signature. Nested's v0.2.3
+# shipped that way once. Cancelling the older run leaves a single build to attach all of the assets.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      # Compiled into the app by option_env! in src-tauri/src/feedback.rs. Local builds read it from
+      # src-tauri/.cargo/config.toml, which git ignores, so CI sets it here. It isn't a secret.
+      LAMPCIRCLE_FEEDBACK_URL: https://lampcircle-feedback.fly.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check required release secrets
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          missing=0
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not configured."
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+
+      # The tag and the app's own version must agree, or the release would carry the wrong number.
+      - name: Check the tag against the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          tag="${GITHUB_REF#refs/tags/v}"
+          if [ "$version" != "$tag" ]; then
+            echo "Tag v$tag does not match src-tauri/tauri.conf.json version $version. Use npm run release -- X.Y.Z."
+            exit 1
+          fi
+
+      # A dry run attaches its build to the release tagged with the app's version. Refuse when that
+      # release is already published, so a dry run can never replace a published release's files.
+      - name: Check the dry run's version isn't published yet
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          status=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/v$version")
+          if [ "$status" = 200 ]; then
+            echo "::error::v$version is already published. Bump the version with npm run release -- X.Y.Z first."
+            exit 1
+          elif [ "$status" != 404 ]; then
+            echo "::error::Couldn't check whether v$version is published (GitHub answered $status)."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - name: Build signed and notarized Tauri updater release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APTABASE_APP_KEY: ${{ secrets.APTABASE_APP_KEY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: v__VERSION__
+          releaseName: Lampcircle __VERSION__
+          releaseBody: |
+            Download the `.dmg` to install Lampcircle. Copies already installed update from Check for Updates… in the Lampcircle menu.
+          # A tag push publishes the release. Running the workflow by hand is a dry run: the same build
+          # into a draft, which the relay never serves, so installed copies don't see it.
+          releaseDraft: ${{ github.event_name == 'workflow_dispatch' }}
+          prerelease: false
+          includeUpdaterJson: true
+          # tauri.release.conf.json turns on the updater artifacts (which need the signing key) only here,
+          # so a plain `npm run tauri build` on a Mac keeps working without it.
+          args: --target universal-apple-darwin --config src-tauri/tauri.release.conf.json
+
+      - name: Verify the notarized app and updater pair
+        run: |
+          bundle_dir=src-tauri/target/universal-apple-darwin/release/bundle
+          if [ ! -d "$bundle_dir" ]; then
+            echo "::error::Tauri bundle directory is missing."
+            exit 1
+          fi
+
+          app=$(find "$bundle_dir" -type d -name '*.app' -print -quit)
+          if [ -z "$app" ]; then
+            echo "::error::No .app bundle was produced."
+            exit 1
+          fi
+          codesign --verify --deep --strict --verbose=2 "$app"
+          xcrun stapler validate "$app"
+          spctl --assess --type execute --verbose=4 "$app"
+
+          archive=$(find "$bundle_dir" -type f -name '*.app.tar.gz' -print -quit)
+          if [ -z "$archive" ] || [ ! -s "$archive" ] || [ ! -s "$archive.sig" ]; then
+            echo "::error::The signed Tauri updater archive or its .sig is missing or empty."
+            exit 1
+          fi

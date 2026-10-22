@@ -1,6 +1,6 @@
 [package]
 name = "lampcircle"
-version = "1.0.0"
+version = "0.1.0"
 description = "Lampcircle, live song maps for leading worship, as a Mac app"
 authors = ["True Frontier"]
 edition = "2021"

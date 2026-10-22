@@ -1,0 +1,10 @@
+name = "lampcircle-feedback"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+# owner/repo the issues are filed on (and the releases are read from), and the label each issue gets.
+GITHUB_REPO = "kevnk/lampcircle"
+LABEL = "feedback"
+
+# GITHUB_TOKEN is a secret, not a var: `wrangler secret put GITHUB_TOKEN`.

@@ -1,5 +1,6 @@
 //! Send feedback → relay → GitHub issues (Nested-style). App never holds a GitHub token.
-//! Set LAMPCIRCLE_FEEDBACK_URL via src-tauri/.cargo/config.toml (see config.toml.example).
+//! LAMPCIRCLE_FEEDBACK_URL is compiled in: release builds get it from .github/workflows/release.yml,
+//! local builds from src-tauri/.cargo/config.toml (see config.toml.example).
 
 use crate::error::{AppError, Result};
 use serde::Serialize;

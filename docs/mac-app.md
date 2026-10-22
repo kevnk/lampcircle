@@ -57,17 +57,32 @@ The template's shortcut-remapping stub is left out, since Lampcircle's keys live
 
 ## Still placeholders
 
-Each of these needs a real value before a public release. None of them belongs in git.
+Only the crash report DSN is still missing. Until it's set, no crash reports are sent, release builds included. Keep it out of git.
 
 | What | Where | Without it |
 |---|---|---|
-| Updater public key and endpoint | `plugins.updater` in `src-tauri/tauri.conf.json` | Check for Updates fails in a release build |
-| Feedback relay URL | `LAMPCIRCLE_FEEDBACK_URL` in `src-tauri/.cargo/config.toml` (copy the `.example`) | Send Feedback says it isn't set up |
-| Aptabase key | `APTABASE_APP_KEY` at build time | No usage counts are sent |
 | Crash report DSN | `VITE_CRASH_DSN` in `.env.local` | No crash reports are sent |
-| Apple Developer ID | Signing and notarization | macOS warns that the app is from an unknown developer |
 
-The release steps (notarization, updater signing, the inert GitHub workflow) are in the template's `docs/notarization.md`. Publishing a release needs Kevin's OK.
+## Releases
+
+`.github/workflows/release.yml` builds the signed, notarized universal app and attaches the `.dmg`, the updater bundle and `latest.json` to a GitHub Release on `kevnk/lampcircle`.
+
+- **Release:** run `npm run release -- 0.2.0`, commit, then push the tag `v0.2.0`. The workflow checks the tag against the app's version and publishes the release. Publishing needs Kevin's OK.
+- **Dry run:** run the workflow by hand (Actions › Release › Run workflow). It builds into a draft release that installed copies never see, and it refuses a version that's already published. Delete the draft before you push that version's tag.
+
+Repository secrets, by name (Settings › Secrets and variables › Actions):
+
+- `TAURI_SIGNING_PRIVATE_KEY`: the contents of `~/.tauri/lampcircle.key`. Its public half is `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`. The key's password is empty, so leave `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` unset.
+- `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_PASSWORD` and `APPLE_TEAM_ID`, plus `APPLE_SIGNING_IDENTITY` if you want to pin it: Developer ID signing and notarization.
+- `APTABASE_APP_KEY` (optional): usage counts. Builds without it send none.
+
+`LAMPCIRCLE_FEEDBACK_URL` isn't a secret. The workflow sets it for release builds. A local build reads it from `src-tauri/.cargo/config.toml`: copy the `.example` and set it to `https://lampcircle-feedback.fly.dev`.
+
+**The relay** in `feedback-relay/` files feedback as GitHub issues and serves updates to installed copies. It runs as the Fly app `lampcircle-feedback`, which **isn't deployed yet**, so Check for Updates and Send Feedback fail in release builds until it is. It needs the Fly secret `GITHUB_TOKEN`: a fine-grained token on `kevnk/lampcircle` with Contents: Read and Issues: Read and write. The repo is public, so feedback issues are public too, contact emails included. See `feedback-relay/README.md`.
+
+**Public fallback.** Because the repo is public, GitHub serves the newest `latest.json` without the relay at `https://github.com/kevnk/lampcircle/releases/latest/download/latest.json`. That URL can replace the relay's in `plugins.updater.endpoints` if the relay goes away.
+
+The template's `docs/notarization.md` covers signing and notarization in depth.
 
 ## Versions and icons
 
