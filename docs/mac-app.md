@@ -78,7 +78,7 @@ Repository secrets, by name (Settings › Secrets and variables › Actions):
 
 `LAMPCIRCLE_FEEDBACK_URL` isn't a secret. The workflow sets it for release builds. A local build reads it from `src-tauri/.cargo/config.toml`: copy the `.example` and set it to `https://lampcircle-feedback.fly.dev`.
 
-**The relay** in `feedback-relay/` files feedback as GitHub issues and serves updates to installed copies. It runs as the Fly app `lampcircle-feedback`, which **isn't deployed yet**, so Check for Updates and Send Feedback fail in release builds until it is. It needs the Fly secret `GITHUB_TOKEN`: a fine-grained token on `kevnk/lampcircle` with Contents: Read and Issues: Read and write. The repo is public, so feedback issues are public too. The app sends only the note, and the relay replaces any email address in it with `[email removed]`. See `feedback-relay/README.md`.
+**The relay** in `feedback-relay/` files feedback as GitHub issues and serves updates to installed copies. It runs as the Fly app `lampcircle-feedback`, deployed at `https://lampcircle-feedback.fly.dev`. Check for Updates and Send Feedback in release builds both go through it. It needs the Fly secret `GITHUB_TOKEN`: a fine-grained token on `kevnk/lampcircle` with Contents: Read and Issues: Read and write. The repo is public, so feedback issues are public too. The app sends only the note, and the relay replaces any email address in it with `[email removed]`. See `feedback-relay/README.md`.
 
 **Public fallback.** Because the repo is public, GitHub serves the newest `latest.json` without the relay at `https://github.com/kevnk/lampcircle/releases/latest/download/latest.json`. That URL can replace the relay's in `plugins.updater.endpoints` if the relay goes away.
 

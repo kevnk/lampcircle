@@ -131,6 +131,7 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
         }}
       >
         <p className="text-muted">A bug, an idea, anything at all.</p>
+        <p className="text-sm text-muted">It becomes a public GitHub issue, so leave out anything private.</p>
         <textarea rows={5} maxLength={FEEDBACK_MAX} placeholder="What happened?" aria-label="Your note" className={field} value={message} onChange={event => setMessage(event.target.value)} autoFocus />
         <div className="flex items-center justify-between gap-3 pt-1">
           <span className="text-sm text-muted">⌘↩ sends</span>
