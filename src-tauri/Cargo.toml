@@ -4,6 +4,7 @@ version = "0.1.1"
 description = "Lampcircle, live song maps for leading worship, as a Mac app"
 authors = ["True Frontier"]
 edition = "2021"
+license = "PolyForm-Noncommercial-1.0.0"
 
 [lib]
 name = "lampcircle_lib"

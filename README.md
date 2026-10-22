@@ -39,3 +39,7 @@ The e2e run saves screenshots to `docs/v2/screens/`, in whichever mode the syste
 ## Brand
 
 The logo, colors, type and light and dark modes all come from the logo file. The rules are in [docs/brand/README.md](docs/brand/README.md).
+
+## License
+
+Lamp Circle is free to use, change and share for noncommercial purposes under the [PolyForm Noncommercial License 1.0.0](LICENSE.md). Selling it, or using it commercially, is not allowed without permission.
