@@ -1,7 +1,7 @@
 # Builds the Mac app and publishes it as a GitHub Release whenever a version tag is pushed.
 # `npm run release -- 0.2.0` sets the version in package.json, tauri.conf.json and Cargo.toml; commit
 # that, then tag v0.2.0 and push the tag. This builds a universal (Apple silicon + Intel) .dmg and the
-# signed updater bundle, and attaches them with latest.json. Installed copies of Lampcircle find the
+# signed updater bundle, and attaches them with latest.json. Installed copies of Lamp Circle find the
 # new version through the relay in feedback-relay/ the next time someone checks for updates.
 #
 # Running it by hand (Actions › Release › Run workflow) is a dry run: the same build, attached to a
@@ -132,9 +132,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: v__VERSION__
-          releaseName: Lampcircle __VERSION__
+          releaseName: Lamp Circle __VERSION__
           releaseBody: |
-            Download the `.dmg` to install Lampcircle. Copies already installed update from Check for Updates… in the Lampcircle menu.
+            Download the `.dmg` to install Lamp Circle. Copies already installed update from Check for Updates… in the Lamp Circle menu.
           # A tag push publishes the release. Running the workflow by hand is a dry run: the same build
           # into a draft, which the relay never serves, so installed copies don't see it.
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' }}
