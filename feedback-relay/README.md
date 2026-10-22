@@ -73,7 +73,7 @@ curl -I "$LAMPCIRCLE_FEEDBACK_URL/updates/dmg"
 
 `attachment` and `app` are optional. The note becomes the issue body (quoted) and its first line the title, with every email address in it swapped for `[email removed]` first. An `email` field is ignored: the relay doesn't check it, store it or post it. Notes over 5000 characters are refused with a plain-text reason the app shows as is.
 
-A screenshot (`attachment`, PNG/JPEG/GIF/WebP, up to 5 MB, base64 in `data` without a `data:` prefix) is committed to a `feedback-attachments` branch of its own, created from the default branch the first time one is needed, and embedded in the issue by its raw URL. Lampcircle's app sends no screenshots, and committing one needs **Contents: Read and write** on the token. If the upload fails, the note is still filed, just without the picture.
+A screenshot (`attachment`, PNG/JPEG/GIF/WebP, up to 5 MB, base64 in `data` without a `data:` prefix) is committed to a `feedback-attachments` branch of its own, created from the default branch the first time one is needed, and embedded in the issue by its raw URL. Lamp Circle's app sends no screenshots, and committing one needs **Contents: Read and write** on the token. If the upload fails, the note is still filed, just without the picture.
 
 Try it (this files a real, public issue):
 

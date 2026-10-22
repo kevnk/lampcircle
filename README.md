@@ -1,4 +1,4 @@
-# DJW · Lampcircle
+# Lamp Circle
 
 Live song maps for leading worship in a small room. Add a recording, tap its beat, mark its sections, shape how each section loops and lands, then build a set and perform it. Section pads change on the beat, and a live pad from a real pad recording carries you between songs.
 
