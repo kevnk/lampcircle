@@ -6,11 +6,14 @@ import { Export } from './screens/Export';
 import { Sets } from './screens/Sets';
 import { Perform } from './screens/Perform';
 import { RestingBars, ThemeSwitch } from './ui';
+import { isTauri } from './platform';
+import { Desktop } from './desktop/Desktop';
 
 export default function App() {
   return (
     <StoreProvider>
       <Shell />
+      {isTauri() && <Desktop />}
     </StoreProvider>
   );
 }
@@ -30,6 +33,8 @@ function Shell() {
   if (route.page === 'perform') return <Perform key={`${route.setId}`} setId={route.setId} item={route.item} />;
   return (
     <div className="flex min-h-full">
+      {/* The Mac app has no title bar, so the window drags from the top edge. */}
+      {isTauri() && <div data-tauri-drag-region className="fixed inset-x-0 top-0 z-30 h-7" />}
       <Sidebar route={route} />
       <main className="min-w-0 flex-1 px-5 py-7 sm:px-8">
         <Page route={route} />
@@ -57,7 +62,11 @@ function Sidebar({ route }: { route: Route }) {
     ['Sets', { page: 'sets' }, route.page === 'sets'],
   ];
   return (
-    <nav className="sticky top-0 flex h-screen w-44 shrink-0 flex-col overflow-y-auto bg-side px-4 py-6 sm:w-[230px]" aria-label="Main">
+    <nav
+      data-tauri-drag-region
+      className="sticky top-0 flex h-screen w-44 shrink-0 flex-col overflow-y-auto bg-side px-4 py-6 sm:w-[230px] [.desktop_&]:pt-16"
+      aria-label="Main"
+    >
       <img src="/brand/logo.webp" alt="Lampcircle" width={600} height={376} className="mx-auto mb-8 w-3/4 max-w-[142px] dark:hidden" draggable={false} />
       <img src="/brand/logo-dark.webp" alt="Lampcircle" width={600} height={376} className="mx-auto mb-8 hidden w-3/4 max-w-[142px] dark:block" draggable={false} />
       <ul className="space-y-1.5">

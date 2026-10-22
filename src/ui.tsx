@@ -284,6 +284,8 @@ export function useKeys(handler: (event: KeyboardEvent) => void) {
       const typing = target instanceof HTMLInputElement && !['range', 'checkbox', 'radio', 'button', 'file'].includes(target.type);
       if (typing || target?.closest('textarea, [contenteditable="true"]')) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      // A dialog over the page, like the Mac app's Send feedback, keeps its keys to itself.
+      if (document.querySelector('[aria-modal="true"]')) return;
       latest.current(event);
     };
     window.addEventListener('keydown', listen);

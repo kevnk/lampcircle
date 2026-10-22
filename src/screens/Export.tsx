@@ -4,7 +4,8 @@ import type { Song } from '../types';
 import { go, useStore } from '../store';
 import { Button, Card, LinkButton, SongHeader, StepPills } from '../ui';
 import { serializeDjw } from '../lib/djw';
-import { download, fileNameFor } from '../lib/library';
+import { fileNameFor } from '../lib/library';
+import { platform } from '../platform';
 import { bpmOf, checks, keysText, songGrid, songKeys } from '../lib/songMap';
 import { doneSteps, stepNav } from './SongTap';
 
@@ -32,8 +33,8 @@ export function Export({ song }: { song: Song }) {
         const writable = await (await folder.getFileHandle(name, { create: true })).createWritable();
         await writable.write(text);
         await writable.close();
-      } else {
-        download(text, name);
+      } else if (!(await platform.saveText(text, name))) {
+        return;
       }
     } catch (problem) {
       return setError(problem instanceof Error ? problem.message : 'Could not save the file.');

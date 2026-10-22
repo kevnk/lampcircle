@@ -297,7 +297,8 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="flex items-center gap-4 border-b border-line px-6 py-3">
+      {/* In the Mac app the window's traffic lights sit at the header's left end, and the header drags the window. */}
+      <header data-tauri-drag-region className="flex items-center gap-4 border-b border-line px-6 py-3 [.desktop_&]:pl-24">
         <button
           type="button"
           className={`rounded-full border px-4 py-2 ${exitArmed ? 'border-danger text-danger' : 'border-line hover:bg-panel'}`}

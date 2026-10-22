@@ -13,6 +13,10 @@ npm run dev
 
 Open http://localhost:43123. `npm run dev` starts the web app and the download helper on port 3001. Downloads land in `library/`. Songs, maps, pads and sets stay in the browser's IndexedDB.
 
+## Mac app
+
+Lampcircle also runs as a Mac app that does its own downloads. With Rust installed, `npm run tauri dev` opens it, and `npm run tauri build` builds it. See [docs/mac-app.md](docs/mac-app.md).
+
 ## The flow
 
 1. **Library.** Paste a YouTube link, or add or drop an audio file. On the Pads tab, **Get all 12 keys** downloads the Worship Pads album *Spontaneous, Vol. 4* from YouTube. Any pad link or playlist works too; the key comes from the title, as in "A# Pad".

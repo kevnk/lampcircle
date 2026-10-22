@@ -41,6 +41,12 @@ export function setTheme(next: Theme) {
 }
 
 system.addEventListener('change', apply);
+// Another window or tab changed it: the Mac app's Settings window, say.
+window.addEventListener('storage', event => {
+  if (event.key !== KEY) return;
+  current = saved();
+  apply();
+});
 apply();
 
 const subscribe = (listener: () => void) => {
