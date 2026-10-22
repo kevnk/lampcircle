@@ -2,7 +2,7 @@
 
 **Help › Send Feedback…** (⌘⇧F) in the app posts a note to this relay, and the relay files it as an issue on `kevnk/lampcircle` labelled `feedback`. The relay also serves the app's updates: installed copies ask it, not GitHub, for the newest release. The app itself never holds a GitHub token; only the relay does, as a secret.
 
-**`kevnk/lampcircle` is public, so every feedback issue is public too**, including the contact email when someone gives one.
+**`kevnk/lampcircle` is public, so every feedback issue is public too.** That's why the relay ignores any `email` field (Lamp Circle 0.1.0 still sends one) and replaces each email address in the note with `[email removed]`, in the issue's title and body alike.
 
 It is two files with no dependencies (`worker.js` for feedback, `updates.js` for updates), written for Cloudflare Workers; `server.mjs` runs the same code on Fly.
 
@@ -66,13 +66,12 @@ curl -I "$LAMPCIRCLE_FEEDBACK_URL/updates/dmg"
 ```json
 {
   "message": "The pad cuts out when…",
-  "email": "me@example.com",
   "attachment": { "name": "shot.png", "mime": "image/png", "data": "<base64>" },
   "app": { "version": "0.1.0", "os": "macos", "arch": "aarch64" }
 }
 ```
 
-`email`, `attachment` and `app` are optional. The note becomes the issue body (quoted), the first line its title, and the contact line carries the email when one was given, so a reply can go back to the person. The repository is public, so anyone can read the issue, email included. Notes over 5000 characters and malformed emails are refused with a plain-text reason the app shows as is.
+`attachment` and `app` are optional. The note becomes the issue body (quoted) and its first line the title, with every email address in it swapped for `[email removed]` first. An `email` field is ignored: the relay doesn't check it, store it or post it. Notes over 5000 characters are refused with a plain-text reason the app shows as is.
 
 A screenshot (`attachment`, PNG/JPEG/GIF/WebP, up to 5 MB, base64 in `data` without a `data:` prefix) is committed to a `feedback-attachments` branch of its own, created from the default branch the first time one is needed, and embedded in the issue by its raw URL. Lampcircle's app sends no screenshots, and committing one needs **Contents: Read and write** on the token. If the upload fails, the note is still filed, just without the picture.
 

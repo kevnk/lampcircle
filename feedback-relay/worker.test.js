@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import worker, { detail, issueBody, titleFor, validAttachment } from "./worker.js";
+import worker, { detail, issueBody, redactEmails, titleFor, validAttachment } from "./worker.js";
 
 test("title is the first non-empty line, clipped", () => {
   assert.equal(titleFor("\n\n  The tree   loses my place\nmore"), "The tree loses my place");
@@ -9,26 +9,32 @@ test("title is the first non-empty line, clipped", () => {
   assert.ok(titleFor(long).endsWith("…"));
 });
 
-test("body quotes the note and carries the contact and app lines", () => {
-  const body = issueBody("line one\nline two", "me@example.com", { version: "0.1.0", os: "macos", arch: "aarch64" });
+test("body quotes the note and carries the app line, with no contact line", () => {
+  const body = issueBody("line one\nline two", { version: "0.1.0", os: "macos", arch: "aarch64" });
   assert.match(body, /^Sent from the app/);
   assert.match(body, /> line one\n> line two/);
-  assert.match(body, /\*\*Contact:\*\* me@example.com/);
   assert.match(body, /\*\*App:\*\* Lampcircle 0\.1\.0, macos aarch64/);
-  assert.match(issueBody("hi", "", {}), /\*\*Contact:\*\* none given/);
-  assert.doesNotMatch(issueBody("hi", "", {}), /\*\*App:\*\*/);
+  assert.doesNotMatch(body, /Contact/);
+  assert.doesNotMatch(issueBody("hi", {}), /\*\*App:\*\*/);
+});
+
+test("emails in free text are redacted", () => {
+  assert.equal(redactEmails("write me at me@example.com."), "write me at [email removed].");
+  assert.equal(redactEmails("name+tag@sub.example.co.uk or a.b_c%d-e@x.io"), "[email removed] or [email removed]");
+  assert.equal(redactEmails("no address @ here, just a@b and @home"), "no address @ here, just a@b and @home");
 });
 
 test("body embeds the screenshot when one was uploaded", () => {
-  const body = issueBody("hi", "", {}, "https://raw.githubusercontent.com/o/r/feedback-attachments/shot.png");
+  const body = issueBody("hi", {}, "https://raw.githubusercontent.com/o/r/feedback-attachments/shot.png");
   assert.match(body, /!\[Screenshot\]\(https:\/\/raw\.githubusercontent\.com\/o\/r\/feedback-attachments\/shot\.png\)/);
-  assert.doesNotMatch(issueBody("hi", "", {}), /!\[Screenshot\]/);
+  assert.doesNotMatch(issueBody("hi", {}), /!\[Screenshot\]/);
 });
 
 test("an attachment must be a small, supported image", () => {
   const small = "A".repeat(100);
   assert.deepEqual(validAttachment({ name: "shot.png", mime: "image/png", data: small }), { mime: "image/png", ext: "png", name: "shot.png", data: small });
   assert.equal(validAttachment({ mime: "image/png", data: small }).name, "screenshot.png");
+  assert.equal(validAttachment({ name: "from me@example.com today.png", mime: "image/png", data: small }).name, "from [email removed] today.png");
   assert.equal(validAttachment(null), null);
   assert.equal(validAttachment({ mime: "text/plain", data: small }), null);
   assert.equal(validAttachment({ mime: "image/png", data: "" }), null);
@@ -38,6 +44,7 @@ test("an attachment must be a small, supported image", () => {
 test("app detail keeps only short strings", () => {
   assert.deepEqual(detail({ version: "1", os: 5, arch: "x".repeat(41), extra: "no" }), { version: "1" });
   assert.deepEqual(detail(null), {});
+  assert.deepEqual(detail({ version: "me@example.com" }), { version: "[email removed]" });
 });
 
 const env = { GITHUB_TOKEN: "t", GITHUB_REPO: "o/r" };
@@ -46,7 +53,6 @@ const post = (body) => new Request("https://relay.test/", { method: "POST", body
 test("refuses bad requests before touching GitHub", async () => {
   assert.equal((await worker.fetch(new Request("https://relay.test/"), env)).status, 405);
   assert.equal((await worker.fetch(post({ message: "  " }), env)).status, 400);
-  assert.equal((await worker.fetch(post({ message: "hi", email: "nope" }), env)).status, 400);
   assert.equal((await worker.fetch(post({ message: "x".repeat(5001) }), env)).status, 413);
   assert.equal((await worker.fetch(post({ message: "hi" }), { GITHUB_REPO: "o/r" })).status, 500);
 });
@@ -66,7 +72,40 @@ test("files the issue and answers with its number", async () => {
     assert.equal(sent.init.headers.Authorization, "Bearer t");
     assert.equal(sent.body.title, "Filter box");
     assert.deepEqual(sent.body.labels, ["feedback"]);
-    assert.match(sent.body.body, /me@example\.com/);
+    assert.doesNotMatch(sent.init.body, /@/);
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test("ignores the email field, even a malformed one, from 0.1.0 clients", async () => {
+  const real = globalThis.fetch;
+  let sent;
+  globalThis.fetch = async (url, init) => {
+    sent = JSON.parse(init.body);
+    return new Response(JSON.stringify({ number: 8, html_url: "https://github.com/o/r/issues/8" }), { status: 201 });
+  };
+  try {
+    assert.equal((await worker.fetch(post({ message: "hi", email: "nope" }), env)).status, 201);
+    assert.doesNotMatch(JSON.stringify(sent), /nope|email|Contact/i);
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test("redacts an email in the note's title line and body", async () => {
+  const real = globalThis.fetch;
+  let sent;
+  globalThis.fetch = async (url, init) => {
+    sent = JSON.parse(init.body);
+    return new Response(JSON.stringify({ number: 9, html_url: "https://github.com/o/r/issues/9" }), { status: 201 });
+  };
+  try {
+    const res = await worker.fetch(post({ message: "Reach me at name+tag@sub.example.co.uk\nor at me@example.com later" }), env);
+    assert.equal(res.status, 201);
+    assert.equal(sent.title, "Reach me at [email removed]");
+    assert.match(sent.body, /> Reach me at \[email removed\]\n> or at \[email removed\] later/);
+    assert.doesNotMatch(JSON.stringify(sent), /@/);
   } finally {
     globalThis.fetch = real;
   }

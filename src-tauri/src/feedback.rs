@@ -19,12 +19,10 @@ pub struct AppInfo {
 #[derive(Serialize, Debug)]
 pub struct Payload {
     pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub email: Option<String>,
     pub app: AppInfo,
 }
 
-pub fn payload(message: &str, email: Option<&str>, version: &str) -> Result<Payload> {
+pub fn payload(message: &str, version: &str) -> Result<Payload> {
     let message = message.trim();
     if message.is_empty() {
         return Err(AppError::Message("Write a note first.".into()));
@@ -34,13 +32,8 @@ pub fn payload(message: &str, email: Option<&str>, version: &str) -> Result<Payl
             "Keep the note under {MAX_MESSAGE} characters."
         )));
     }
-    let email = email
-        .map(str::trim)
-        .filter(|e| !e.is_empty())
-        .map(str::to_owned);
     Ok(Payload {
         message: message.to_owned(),
-        email,
         app: AppInfo {
             version: version.to_owned(),
             os: std::env::consts::OS,
@@ -87,4 +80,38 @@ pub async fn send(url: &str, payload: &Payload) -> Result<()> {
             why.to_owned()
         };
     Err(AppError::Message(message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payload_trims_the_note() {
+        assert_eq!(
+            payload("  hi there \n", "0.1.0").unwrap().message,
+            "hi there"
+        );
+    }
+
+    #[test]
+    fn empty_and_overlong_notes_are_refused() {
+        assert!(payload(" \n ", "0.1.0").is_err());
+        assert!(payload(&"x".repeat(MAX_MESSAGE), "0.1.0").is_ok());
+        assert!(payload(&"x".repeat(MAX_MESSAGE + 1), "0.1.0").is_err());
+    }
+
+    #[test]
+    fn payload_sends_only_the_note_and_app() {
+        let json = serde_json::to_value(payload("hi", "0.1.0").unwrap()).unwrap();
+        let mut keys: Vec<&str> = json
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["app", "message"]);
+        assert_eq!(json["app"]["version"], "0.1.0");
+    }
 }

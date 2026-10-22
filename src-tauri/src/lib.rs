@@ -41,15 +41,11 @@ fn save_settings(app: AppHandle, settings: Value) -> Result<()> {
 }
 
 #[tauri::command]
-async fn send_feedback(app: AppHandle, message: String, email: Option<String>) -> Result<()> {
+async fn send_feedback(app: AppHandle, message: String) -> Result<()> {
     let url = feedback::relay_url(feedback::RELAY_URL)?;
-    let payload = feedback::payload(
-        &message,
-        email.as_deref(),
-        &app.package_info().version.to_string(),
-    )?;
+    let payload = feedback::payload(&message, &app.package_info().version.to_string())?;
     feedback::send(url, &payload).await?;
-    analytics::track_feedback_sent(&app, email.is_some());
+    analytics::track_feedback_sent(&app);
     Ok(())
 }
 

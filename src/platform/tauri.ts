@@ -30,7 +30,7 @@ export const desktop: Desktop = {
   onSettingsChanged: handler => onEvent<unknown>('settings-changed', settings => handler(normalizeSettings(settings))),
   onCommand: handler => onEvent<string>('command', handler),
   openSettings: () => invoke<void>('open_settings'),
-  sendFeedback: (message, email) => invoke<void>('send_feedback', { message, email: email || null }),
+  sendFeedback: message => invoke<void>('send_feedback', { message }),
   checkForUpdate: () => invoke<UpdateCheck>('check_for_update'),
   async installUpdate(onProgress) {
     const channel = new Channel<UpdateProgress>();

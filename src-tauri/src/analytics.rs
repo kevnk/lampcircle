@@ -55,18 +55,13 @@ pub fn track_app_opened(app: &AppHandle) {
     }
 }
 
-pub fn track_feedback_sent(app: &AppHandle, has_email: bool) {
+pub fn track_feedback_sent(app: &AppHandle) {
     if !enabled(app) {
         return;
     }
-    #[cfg(not(feature = "aptabase"))]
-    let _ = has_email;
     #[cfg(feature = "aptabase")]
     {
-        let _ = app.track_event(
-            "feedback_sent",
-            Some(json!({ "has_email": if has_email { 1 } else { 0 } })),
-        );
+        let _ = app.track_event("feedback_sent", None);
     }
 }
 

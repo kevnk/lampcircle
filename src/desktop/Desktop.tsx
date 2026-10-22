@@ -97,10 +97,9 @@ function Dialog({ title, onClose, children }: { title: string; onClose: () => vo
 
 const field = 'w-full rounded-2xl border border-faint bg-well px-4 py-3';
 
-/** Note plus optional email, to the feedback relay, which files a GitHub issue. The app never holds a token. */
+/** The note alone, to the feedback relay, which files a public GitHub issue. The app never holds a token. */
 function FeedbackDialog({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState('');
-  const [email, setEmail] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -109,7 +108,7 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setStatus(null);
     try {
-      await desktop.sendFeedback(message, email.trim() || undefined);
+      await desktop.sendFeedback(message);
       setStatus('Sent. Thank you.');
       setMessage('');
     } catch (error) {
@@ -133,7 +132,6 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
       >
         <p className="text-muted">A bug, an idea, anything at all.</p>
         <textarea rows={5} maxLength={FEEDBACK_MAX} placeholder="What happened?" aria-label="Your note" className={field} value={message} onChange={event => setMessage(event.target.value)} autoFocus />
-        <input type="email" placeholder="Email, if you'd like a reply" aria-label="Email" className={field} value={email} onChange={event => setEmail(event.target.value)} />
         <div className="flex items-center justify-between gap-3 pt-1">
           <span className="text-sm text-muted">⌘↩ sends</span>
           <Button tone="primary" type="submit" disabled={busy || !message.trim()}>

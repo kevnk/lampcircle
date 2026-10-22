@@ -90,7 +90,7 @@ export type Desktop = {
   onSettingsChanged(handler: (settings: Settings) => void): () => void;
   onCommand(handler: (command: string) => void): () => void;
   openSettings(): Promise<void>;
-  sendFeedback(message: string, email?: string): Promise<void>;
+  sendFeedback(message: string): Promise<void>;
   checkForUpdate(): Promise<UpdateCheck>;
   installUpdate(onProgress: (progress: UpdateProgress) => void): Promise<void>;
   relaunch(): Promise<void>;

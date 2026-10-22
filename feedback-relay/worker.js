@@ -1,21 +1,24 @@
 // Feedback relay: a Cloudflare Worker (or, through server.mjs, a Fly machine) that takes a note
-// from the Send feedback box in Lampcircle and files it as a GitHub issue on this repo. It also serves
+// from the Send feedback box in Lamp Circle and files it as a GitHub issue on this repo. It also serves
 // the app's updates from the repo's releases (updates.js). The app never holds a GitHub token;
 // only this relay does.
 //
+// The repo is public, so every issue is too. The relay ignores any `email` field (0.1.0 clients still
+// send one) and swaps each address in the note for `[email removed]` before it builds the title or body.
+//
 // Deploy with `wrangler deploy` from this folder, then `wrangler secret put GITHUB_TOKEN` with a
-// fine-grained token that has Issues: read and write and Contents: read on the repo. Lampcircle sends
+// fine-grained token that has Issues: read and write and Contents: read on the repo. Lamp Circle sends
 // no screenshots; committing one to its own branch would need Contents: write (see uploadAttachment).
 // See README.md.
 
 import { handleUpdates } from "./updates.js";
 
 const MAX_MESSAGE = 5000;
-const MAX_EMAIL = 200;
 const MAX_TITLE = 72;
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 const ATTACHMENT_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 const ATTACHMENTS_BRANCH = "feedback-attachments";
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 
 export default {
   async fetch(request, env) {
@@ -31,11 +34,10 @@ export default {
     } catch {
       return text(400, "Send JSON");
     }
-    const message = typeof body?.message === "string" ? body.message.trim() : "";
-    if (!message) return text(400, "The note is empty");
-    if (message.length > MAX_MESSAGE) return text(413, `Keep the note under ${MAX_MESSAGE} characters`);
-    const email = typeof body?.email === "string" ? body.email.trim() : "";
-    if (email && (email.length > MAX_EMAIL || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) return text(400, "That email address doesn't look right");
+    const note = typeof body?.message === "string" ? body.message.trim() : "";
+    if (!note) return text(400, "The note is empty");
+    if (note.length > MAX_MESSAGE) return text(413, `Keep the note under ${MAX_MESSAGE} characters`);
+    const message = redactEmails(note);
     const app = detail(body?.app);
 
     let attachmentUrl;
@@ -52,7 +54,7 @@ export default {
 
     const res = await gh(env, `/repos/${env.GITHUB_REPO}/issues`, {
       method: "POST",
-      body: JSON.stringify({ title: titleFor(message), body: issueBody(message, email, app, attachmentUrl), labels: [env.LABEL || "feedback"] }),
+      body: JSON.stringify({ title: titleFor(message), body: issueBody(message, app, attachmentUrl), labels: [env.LABEL || "feedback"] }),
     });
     if (!res.ok) {
       const why = await res.text().catch(() => "");
@@ -72,7 +74,8 @@ export function validAttachment(a) {
   const data = typeof a.data === "string" ? a.data : "";
   // Base64 runs about 4/3 the size of the bytes it holds; this bounds it without decoding first.
   if (!data || data.length > (MAX_ATTACHMENT_BYTES * 4) / 3 + 4) return null;
-  const name = typeof a.name === "string" && a.name.trim() ? a.name.trim().slice(0, 100) : `screenshot.${ext}`;
+  // The name lands in a public commit message, so it gets the same redaction as the note.
+  const name = typeof a.name === "string" && a.name.trim() ? redactEmails(a.name.trim()).slice(0, 100) : `screenshot.${ext}`;
   return { mime: a.mime, ext, name, data };
 }
 
@@ -132,16 +135,20 @@ export function titleFor(message) {
 export function detail(app) {
   const out = {};
   if (app && typeof app === "object") {
-    for (const k of ["version", "os", "arch"]) if (typeof app[k] === "string" && app[k].length <= 40) out[k] = app[k];
+    for (const k of ["version", "os", "arch"]) if (typeof app[k] === "string" && app[k].length <= 40) out[k] = redactEmails(app[k]);
   }
   return out;
 }
 
-export function issueBody(message, email, app, attachmentUrl) {
+/** Every email address in free text, swapped for a placeholder, since issues on this repo are public. */
+export function redactEmails(text) {
+  return text.replace(EMAIL, "[email removed]");
+}
+
+export function issueBody(message, app, attachmentUrl) {
   const quoted = message.split("\n").map((l) => `> ${l}`).join("\n");
   const lines = ["Sent from the app with **Send feedback**.", "", quoted, ""];
   if (attachmentUrl) lines.push(`![Screenshot](${attachmentUrl})`, "");
-  lines.push(`**Contact:** ${email ? email : "none given"}`);
   const parts = [app.version && `Lampcircle ${app.version}`, app.os && `${app.os}${app.arch ? ` ${app.arch}` : ""}`].filter(Boolean);
   if (parts.length) lines.push(`**App:** ${parts.join(", ")}`);
   return lines.join("\n");
