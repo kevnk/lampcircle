@@ -9,7 +9,7 @@ The web app still works as before (`npm run dev`), for tablets on the same netwo
 You need Rust (`rustup`), Node 22 or later, and `brew install yt-dlp ffmpeg`.
 
 ```bash
-npm run tauri dev                          # a dev window on port 1420, with hot reload
+npm run tauri dev                          # a dev window on 127.0.0.1:1427, with hot reload
 npm run tauri build -- --debug --bundles app   # a local Lampcircle.app, unsigned
 npm run tauri build                        # release .app and .dmg (signing needs the steps below)
 ```

@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "app.truefrontier.lampcircle",
   "build": {
-    "beforeDevCommand": "npm run dev:client -- --port 1420 --strictPort",
-    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm run dev:client -- --port 1427 --strictPort --host 127.0.0.1",
+    "devUrl": "http://127.0.0.1:1427",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
