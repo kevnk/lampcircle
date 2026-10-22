@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Lamp Circle",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "app.truefrontier.lampcircle",
   "build": {
     "beforeDevCommand": "npm run dev:client -- --port 1427 --strictPort --host 127.0.0.1",
