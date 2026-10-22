@@ -5,6 +5,8 @@ import { EVEN_LOUDNESS, clockBoundary, decideNext, fadeCurve, fadeOutStart, lead
 
 const COMMIT_AHEAD = 3;
 const MIN_RAMP = 0.005;
+/** Seconds a loop's lead-in takes to fade away when you let go of a hold after it started. */
+const LET_GO_FADE = 0.2;
 
 interface Bus {
   ctx: AudioContext;
@@ -471,10 +473,19 @@ export class PerformSession {
     if (this.planned === 'end' && this.endAt === null) this.planned = null;
   }
 
+  /** Toggles what the Hold button shows, so letting go of a loop already on its way never turns hold back on. */
   toggleHold() {
-    this.holding = !this.holding;
+    const letGo = this.held();
+    this.holding = !letGo;
     this.pick = null;
-    this.replan();
+    this.replan(letGo);
+  }
+
+  /** Holding as heard: asked for and able to loop, or a loop already coming in that letting go was too late to take back. */
+  private held(): boolean {
+    const t = now();
+    if (this.segments.some((segment, k) => k > 0 && segment.reason === 'hold' && t < segment.landingCtx)) return true;
+    return this.holding && !this.forced && !this.only && this.planned !== 'end';
   }
 
   /** Fade the song out over `bars` from `from`, and end it there. */
@@ -668,25 +679,34 @@ export class PerformSession {
     this.clock = { anchor: now(), bar, barLen, beatsPerBar };
   }
 
-  private replan() {
+  private replan(letGo = false) {
     if (this.forced || this.only) return;
-    this.revoke();
+    this.revoke(letGo);
     this.planned = null;
     this.endAt = null;
     this.tick();
   }
 
-  /** Undo committed transitions that have not started sounding yet. */
-  private revoke() {
+  /**
+   * Undo committed transitions that have not started sounding yet. Letting go of a hold also takes back a loop whose
+   * lead-in has started, until the pass before it starts fading out: the lead-in fades away and that pass plays on.
+   */
+  private revoke(letGo = false) {
     const t = now();
     while (this.segments.length > 1) {
       const last = this.segments[this.segments.length - 1];
-      if (t + 0.03 >= Math.min(last.startCtx, last.prevFadeCtx)) break;
+      const locked = letGo && last.reason === 'hold' ? Math.min(last.prevFadeCtx, last.landingCtx) : Math.min(last.startCtx, last.prevFadeCtx);
+      if (t + 0.03 >= locked) break;
       this.segments.pop();
       const prev = this.segments[this.segments.length - 1];
       if (last.voice === prev.voice) continue;
-      stop(last.voice);
-      last.voice.gain.disconnect();
+      if (t + 0.03 < last.startCtx) {
+        stop(last.voice);
+        last.voice.gain.disconnect();
+      } else {
+        fadeTo(last.voice, 0, t, t + LET_GO_FADE);
+        stop(last.voice, t + LET_GO_FADE + 0.05);
+      }
       restore(prev.voice, last.prevPoints, last.prevFadeCtx);
       if (last.gapPad) {
         this.padTicket++;
@@ -874,14 +894,15 @@ export class PerformSession {
       }
       const passBars = view.e - view.s;
       const barsInPass = Math.max(0, view.e - Math.max(view.s, at.bar - 1));
-      const remainingPasses = this.holding ? 0 : Math.max(0, view.section.repeats - current.pass);
+      const hold = this.held();
+      const remainingPasses = hold ? 0 : Math.max(0, view.section.repeats - current.pass);
       const later = ps.views.slice(current.idx + 1).reduce((sum, item) => sum + (item.end - item.start) * item.section.repeats, 0);
       song = {
         title: ps.song.title,
         idx: current.idx,
         pass: current.pass,
         repeats: view.section.repeats,
-        hold: this.holding,
+        hold,
         bar: at.bar,
         beat: at.beat,
         beatsPerBar: ps.song.beatsPerBar,

@@ -277,7 +277,7 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
       const idx = Number(event.key) - 1;
       if (!started) startSong(idx);
       else if (idx < views.length) session?.pickSection(idx);
-    } else if (isSong && event.key.toLowerCase() === 'h') {
+    } else if (isSong && event.key.toLowerCase() === 'h' && !event.repeat) {
       session?.toggleHold();
     } else if (isSong && event.key === 'Escape') {
       session?.cancel();

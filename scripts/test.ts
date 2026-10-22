@@ -278,6 +278,59 @@ same('a file that is not a library says so', await problem(new Blob(['{"songs": 
 same('a library file cut short says so', await problem(packed.slice(0, packed.size - 1)), 'This library file is incomplete. Export it again.');
 same('library file name', backup.libraryFileName(new Date(2026, 9, 21)), 'lampcircle-library-2026-10-21.lampcircle');
 
+// Hold in Perform, on an audio clock the test moves. Bars are 2 s. The Verse (8-16 s) has a 2-beat pickup and a
+// 2-beat fade-in, so its next pass starts sounding 2 s before its seam, and this pass fades out over the last beat.
+let clockNow = 0;
+const gainNode = () => ({ gain: { value: 0, cancelScheduledValues() {}, linearRampToValueAtTime() {}, setTargetAtTime() {} }, connect: (to: unknown) => to, disconnect() {} });
+Object.assign(globalThis, {
+  window: { setInterval: () => 0, clearInterval() {} },
+  AudioContext: class {
+    destination = {};
+    get currentTime() {
+      return clockNow;
+    }
+    createGain = gainNode;
+    createAnalyser = () => ({ ...gainNode(), fftSize: 0 });
+    createBufferSource = () => ({ connect: (to: unknown) => to, start() {}, stop() {} });
+    resume = async () => {};
+  },
+});
+const engine = await import('../src/audio/engine.ts');
+const holdSection = (type: string, at: number, more = {}) => ({ id: type, type, at, pickupBeats: 0, fadeInBeats: 0, fadeOutBeats: 1, repeats: 1, jumpAt: 'section', ...more });
+const holdSong = {
+  ...{ id: 'hold', title: 'Hold', artist: '', duration: 32, peaks: [], chroma: [], beatsPerBar: 4, fill: false, marksEnd: 32, refined: true, updatedAt: 0, addedAt: 0 },
+  taps: Array.from({ length: 64 }, (_, i) => ({ t: i * 0.5, one: i % 4 === 0 })),
+  sections: [holdSection('intro', 0), holdSection('verse', 8, { pickupBeats: 2, fadeInBeats: 2 }), holdSection('chorus', 16)],
+} as never;
+const holdPs = { song: holdSong, grid: map.songGrid(holdSong), views: map.sectionViews(holdSong), buffer: { duration: 32 } } as never;
+type Session = InstanceType<typeof engine.PerformSession>;
+/** Plays the Verse, doing each step the given seconds before its seam. Returns the passes as they land, as "section.pass". */
+function perform(steps: Array<[number, (session: Session) => void]>): string[] {
+  clockNow = 0;
+  const session = new engine.PerformSession(async () => null);
+  session.startSong(holdPs, { from: 1 });
+  const first = session.segments[0];
+  const seamAt = first.landingCtx + (first.seamAudio - first.landingAudio);
+  const landed: string[] = [];
+  for (let i = 0; clockNow < seamAt + 9; clockNow += 0.01) {
+    while (i < steps.length && clockNow >= seamAt - steps[i][0]) steps[i++][1](session);
+    session.tick();
+    const now = session.segments[0];
+    if (now && clockNow >= now.landingCtx && landed.at(-1) !== `${now.idx}.${now.pass}`) landed.push(`${now.idx}.${now.pass}`);
+  }
+  return landed;
+}
+let shown: boolean[] = [];
+const look = (session: Session) => shown.push(session.snapshot().song!.hold);
+same('hold loops the Verse', perform([[6, session => session.toggleHold()]]).slice(0, 3), ['1.1', '1.2', '1.3']);
+const letGo = perform([[6, session => session.toggleHold()], [1.5, session => (session.toggleHold(), look(session))]]);
+same('letting go after the loop starts coming in still moves on, not round again', letGo, ['1.1', '2.1']);
+same('and Hold shows off at once', shown, [false]);
+shown = [];
+const tooLate = perform([[6, session => session.toggleHold()], [0.3, session => (session.toggleHold(), look(session), session.toggleHold(), look(session))], [-0.1, look]]);
+same('once the Verse is fading out under the loop, it plays once more and then moves on', tooLate, ['1.1', '1.2', '2.1']);
+same('Hold stays lit until that loop lands, a second press keeps it letting go, then it shows off', shown, [true, true, false]);
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);
