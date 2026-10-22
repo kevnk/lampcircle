@@ -17,7 +17,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
 const NOT_INSTALLED: &str =
-    "yt-dlp is not installed. Install it with brew install yt-dlp ffmpeg, then reopen Lampcircle.";
+    "yt-dlp is not installed. Install it with brew install yt-dlp ffmpeg, then reopen Lamp Circle.";
 
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -161,7 +161,7 @@ fn open_settings(app: AppHandle) -> Result<()> {
 fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     let about = PredefinedMenuItem::about(
         app,
-        Some("About Lampcircle"),
+        Some("About Lamp Circle"),
         Some(AboutMetadata::default()),
     )?;
     let check_update = MenuItemBuilder::with_id("check-update", "Check for Updates…").build(app)?;
@@ -175,7 +175,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<()> {
         .accelerator("CmdOrCtrl+Shift+F")
         .build(app)?;
 
-    let app_menu = SubmenuBuilder::new(app, "Lampcircle")
+    let app_menu = SubmenuBuilder::new(app, "Lamp Circle")
         .item(&about)
         .item(&check_update)
         .separator()
@@ -245,10 +245,14 @@ pub fn run() {
         )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
-        ))
+        // The LaunchAgent file is named after the app. It keeps the name from before "Lamp Circle",
+        // so an Open at Login turned on then still reads as on and can be turned off.
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent)
+                .app_name("Lampcircle")
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init());
 
     #[cfg(feature = "aptabase")]

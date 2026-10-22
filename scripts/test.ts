@@ -269,7 +269,7 @@ same('library file keeps every record', [unpacked.songs, unpacked.pads, unpacked
 const bytes = await Promise.all(unpacked.audio.map(async ([id, blob]) => [id, blob.type, [...new Uint8Array(await blob.arrayBuffer())]]));
 same('library file keeps every recording, byte for byte', bytes, [['s1', 'audio/mpeg', [1, 2, 3]], ['s2', 'audio/wav', [0, 255]], ['p1', 'audio/mpeg', [9, 8, 7, 6]]]);
 const problem = (file: Blob) => backup.unpackLibrary(file).then(() => 'read', error => error.message);
-same('a file that is not a library says so', await problem(new Blob(['{"songs": []}'])), 'This is not a Lampcircle library file.');
+same('a file that is not a library says so', await problem(new Blob(['{"songs": []}'])), 'This is not a Lamp Circle library file.');
 same('a library file cut short says so', await problem(packed.slice(0, packed.size - 1)), 'This library file is incomplete. Export it again.');
 same('library file name', backup.libraryFileName(new Date(2026, 9, 21)), 'lampcircle-library-2026-10-21.lampcircle');
 

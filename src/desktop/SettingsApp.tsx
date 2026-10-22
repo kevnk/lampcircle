@@ -95,7 +95,7 @@ export function SettingsApp() {
               <ThemeSwitch />
             </div>
           </Row>
-          <Row label="When Lampcircle opens">
+          <Row label="When Lamp Circle opens">
             <select
               className="rounded-full border border-edge bg-panel px-3 py-1.5"
               value={settings.openAtLaunch}

@@ -67,8 +67,8 @@ function Sidebar({ route }: { route: Route }) {
       className="sticky top-0 flex h-screen w-44 shrink-0 flex-col overflow-y-auto bg-side px-4 py-6 sm:w-[230px] [.desktop_&]:pt-16"
       aria-label="Main"
     >
-      <img src="/brand/logo.webp" alt="Lampcircle" width={600} height={376} className="mx-auto mb-8 w-3/4 max-w-[142px] dark:hidden" draggable={false} />
-      <img src="/brand/logo-dark.webp" alt="Lampcircle" width={600} height={376} className="mx-auto mb-8 hidden w-3/4 max-w-[142px] dark:block" draggable={false} />
+      <img src="/brand/logo.webp" alt="Lamp Circle" width={600} height={376} className="mx-auto mb-8 w-3/4 max-w-[142px] dark:hidden" draggable={false} />
+      <img src="/brand/logo-dark.webp" alt="Lamp Circle" width={600} height={376} className="mx-auto mb-8 hidden w-3/4 max-w-[142px] dark:block" draggable={false} />
       <ul className="space-y-1.5">
         {items.map(([label, target, active]) => (
           <li key={label}>

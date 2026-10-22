@@ -26,7 +26,7 @@ export function packLibrary({ songs, pads, sets, audio }: Backup): Blob {
 
 /** Reads only the header. Each recording comes back as a slice of the file, read when it is stored. */
 export async function unpackLibrary(file: Blob): Promise<Backup> {
-  const notOurs = new Error('This is not a Lampcircle library file.');
+  const notOurs = new Error('This is not a Lamp Circle library file.');
   if (file.size < 4) throw notOurs;
   const length = new DataView(await file.slice(0, 4).arrayBuffer()).getUint32(0, true);
   if (4 + length > file.size) throw notOurs;

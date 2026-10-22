@@ -1,6 +1,6 @@
 {
-  "name": "Lampcircle",
-  "short_name": "Lampcircle",
+  "name": "Lamp Circle",
+  "short_name": "Lamp Circle",
   "description": "Live song maps for leading worship in a small room.",
   "start_url": "/",
   "display": "standalone",

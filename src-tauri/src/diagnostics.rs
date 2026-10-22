@@ -23,7 +23,7 @@ pub const LOG_FILES_TO_KEEP: usize = 3;
 const MAX_EXPORTED_LOG_BYTES: u64 = 2_000_000;
 const MAX_EXPORTED_LOG_TOTAL_BYTES: u64 = 3_000_000;
 const README: &str = "\
-Lampcircle diagnostics
+Lamp Circle diagnostics
 
 This archive was created locally for support. Nothing was uploaded.
 
@@ -540,7 +540,7 @@ private-material
         let metadata = BundleMetadata {
             schema_version: 1,
             generated_at_unix_seconds: 1,
-            app_name: "Lampcircle".into(),
+            app_name: "Lamp Circle".into(),
             app_version: "0.0.1".into(),
             app_identifier: "app.truefrontier.lampcircle".into(),
             os: "macos",
