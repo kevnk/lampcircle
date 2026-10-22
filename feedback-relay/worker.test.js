@@ -13,7 +13,7 @@ test("body quotes the note and carries the app line, with no contact line", () =
   const body = issueBody("line one\nline two", { version: "0.1.0", os: "macos", arch: "aarch64" });
   assert.match(body, /^Sent from the app/);
   assert.match(body, /> line one\n> line two/);
-  assert.match(body, /\*\*App:\*\* Lampcircle 0\.1\.0, macos aarch64/);
+  assert.match(body, /\*\*App:\*\* Lamp Circle 0\.1\.0, macos aarch64/);
   assert.doesNotMatch(body, /Contact/);
   assert.doesNotMatch(issueBody("hi", {}), /\*\*App:\*\*/);
 });

@@ -149,7 +149,7 @@ export function issueBody(message, app, attachmentUrl) {
   const quoted = message.split("\n").map((l) => `> ${l}`).join("\n");
   const lines = ["Sent from the app with **Send feedback**.", "", quoted, ""];
   if (attachmentUrl) lines.push(`![Screenshot](${attachmentUrl})`, "");
-  const parts = [app.version && `Lampcircle ${app.version}`, app.os && `${app.os}${app.arch ? ` ${app.arch}` : ""}`].filter(Boolean);
+  const parts = [app.version && `Lamp Circle ${app.version}`, app.os && `${app.os}${app.arch ? ` ${app.arch}` : ""}`].filter(Boolean);
   if (parts.length) lines.push(`**App:** ${parts.join(", ")}`);
   return lines.join("\n");
 }
