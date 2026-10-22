@@ -407,7 +407,7 @@ mod tests {
         assert!(link("https://a b").is_err());
     }
 
-    /// Runs the queue against the fake yt-dlp the e2e suite uses.
+    /// Runs the queue against the fake yt-dlp the e2e suite uses, with two .djw imports added back to back.
     #[test]
     fn downloads_with_the_e2e_fake() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
@@ -415,27 +415,36 @@ mod tests {
         let library = work.join("library");
         std::fs::create_dir_all(&library).unwrap();
         std::fs::write(work.join("song-a.wav"), b"RIFF fake").unwrap();
+        std::fs::write(work.join("song-b.wav"), b"RIFF fake").unwrap();
         std::fs::write(work.join("outside.mp3"), b"secret").unwrap();
         std::env::set_var("YT_DLP_PATH", root.join("scripts/fake-yt-dlp.mjs"));
         std::env::set_var("FAKE_YTDLP_FIXTURES", &work);
         let downloads = Arc::new(Downloads::new(library.clone()).unwrap());
 
-        downloads.queue().jobs.push(Job {
-            id: "a".into(),
-            url: "https://www.youtube.com/watch?v=morning".into(),
-            status: "queued",
-            ..Job::default()
-        });
-        downloads.next();
+        for (id, url) in [("a", "https://www.youtube.com/watch?v=morning"), ("b", "https://www.youtube.com/watch?v=evening")] {
+            downloads.queue().jobs.push(Job {
+                id: id.into(),
+                url: url.into(),
+                map: Some(serde_json::json!({ "title": id })),
+                status: "queued",
+                ..Job::default()
+            });
+            downloads.next();
+        }
+        assert_eq!(downloads.queue().jobs[1].status, "queued", "the second waits its turn");
         let started = Instant::now();
-        let job = loop {
-            let job = downloads.queue().jobs[0].clone();
-            if job.status == "done" || job.status == "error" || started.elapsed() > Duration::from_secs(20) {
-                break job;
+        let jobs = loop {
+            let jobs = downloads.queue().jobs.clone();
+            if jobs.iter().all(|job| job.status == "done" || job.status == "error") || started.elapsed() > Duration::from_secs(30) {
+                break jobs;
             }
             std::thread::sleep(Duration::from_millis(50));
         };
+        let (job, second) = (jobs[0].clone(), &jobs[1]);
         assert_eq!(job.status, "done", "{:?}", job.error);
+        assert_eq!(second.status, "done", "{:?}", second.error);
+        assert_eq!(second.file_name.as_deref(), Some("Evening Test [tchvevening].mp3"));
+        assert_eq!(jobs.iter().map(|job| job.map.clone()).collect::<Vec<_>>(), [Some(serde_json::json!({ "title": "a" })), Some(serde_json::json!({ "title": "b" }))]);
         assert_eq!(job.title.as_deref(), Some("Test Band - Morning Test (Official Video)"));
         assert_eq!(job.file_name.as_deref(), Some("Test Band - Morning Test (Official Video) [tchvmorning].mp3"));
         assert!(downloads.inside(&library.join(job.file_name.unwrap())).is_some());

@@ -154,7 +154,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setHelperDown(list === null);
       if (!list) return setJobs([]);
       setJobs(list);
-      for (const job of list.filter(item => item.status === 'done' && !importing.has(item.id))) {
+      for (const job of list) {
+        // Checked per job: a poll that started during an earlier import may have taken this one already.
+        if (job.status !== 'done' || importing.has(job.id)) continue;
         importing.add(job.id);
         try {
           const item = await importJob(job);

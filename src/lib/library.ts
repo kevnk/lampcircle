@@ -37,6 +37,11 @@ export function jobKind(job: Job): 'song' | 'pad' {
   return job.kind ?? (/\bpads?\b/i.test(job.title ?? '') ? 'pad' : 'song');
 }
 
+/** The waiting .djw map a recording goes to: the one you chose audio for, else the one waiting longest. */
+export function mapForRecording(waiting: DjwMap[], chosen: DjwMap | null): DjwMap | undefined {
+  return waiting.find(map => map === chosen) ?? waiting[0];
+}
+
 /** Turn a finished download into a song or pad. */
 export async function importJob(job: Job): Promise<Song | Pad> {
   const blob = await helper.file(job.fileName!);

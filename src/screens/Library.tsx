@@ -3,7 +3,7 @@ import { Play, Square, Trash2 } from 'lucide-react';
 import type { Song } from '../types';
 import { go, useStore } from '../store';
 import { Button, Card, Label, LinkButton, Menu, MenuItem, MiniStrip, RestingBars } from '../ui';
-import { PAD_ALBUM, helper, importPad, importSong, jobKind, queueLink, splitTitle, type Job } from '../lib/library';
+import { PAD_ALBUM, helper, importPad, importSong, jobKind, mapForRecording, queueLink, splitTitle, type Job } from '../lib/library';
 import { parseDjw, type DjwMap } from '../lib/djw';
 import { KEY_NAMES } from '../lib/music';
 import { STEP_LABEL, bpmOf, clock, keysText, nextStep, sectionViews, songGrid, songKeys, type Step } from '../lib/songMap';
@@ -20,7 +20,10 @@ export function Library() {
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [waiting, setWaiting] = useState<DjwMap | null>(null);
+  /** .djw maps waiting for you to choose their recordings, oldest first. Each import adds its own row. */
+  const [waiting, setWaiting] = useState<DjwMap[]>([]);
+  /** The waiting map whose Choose audio was clicked. */
+  const choosing = useRef<DjwMap | null>(null);
   const djwInput = useRef<HTMLInputElement>(null);
   const audioInput = useRef<HTMLInputElement>(null);
   const libraryInput = useRef<HTMLInputElement>(null);
@@ -40,14 +43,22 @@ export function Library() {
   };
 
   const addFiles = async (files: FileList | File[]) => {
+    let maps = waiting;
     for (const file of Array.from(files)) {
       try {
         if (/\.(djw|ya?ml)$/i.test(file.name)) {
           await openDjw(file);
-        } else if (waiting) {
-          const song = await importSong(file, { title: waiting.title, artist: waiting.artist, audioFile: file.name }, waiting);
+        } else if (maps.length) {
+          const map = mapForRecording(maps, choosing.current)!;
+          choosing.current = null;
+          // Taken off the queue before the import, so audio added meanwhile goes to the next map. It goes back if this fails.
+          maps = maps.filter(item => item !== map);
+          setWaiting(list => list.filter(item => item !== map));
+          const song = await importSong(file, { title: map.title, artist: map.artist, audioFile: file.name }, map).catch(error => {
+            setWaiting(list => [map, ...list]);
+            throw error;
+          });
           store.addSong(song);
-          setWaiting(null);
           setSelectedId(song.id);
           setNotice(`${song.title} is in your library with its map.`);
         } else if (tab === 'pads') {
@@ -79,7 +90,7 @@ export function Library() {
       setSelectedId(song.id);
       return;
     }
-    setWaiting(map);
+    setWaiting(list => [...list, map]);
   };
 
   // ponytail: no export in the Mac app yet. Its save_text takes a string, and a library is hundreds of MB.
@@ -160,21 +171,27 @@ export function Library() {
           </button>
         </p>
       )}
-      {waiting && (
-        <Card className="mb-4 flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+      {waiting.map((map, i) => (
+        <Card key={i} className="mb-4 flex flex-wrap items-center justify-between gap-3 px-5 py-4">
           <p>
-            The map for <b>{waiting.title}</b> is ready. Choose the recording that goes with it.
+            The map for <b>{map.title}</b> is ready. Choose the recording that goes with it.
           </p>
           <div className="flex gap-2">
-            <Button tone="primary" onClick={() => audioInput.current?.click()}>
+            <Button
+              tone="primary"
+              onClick={() => {
+                choosing.current = map;
+                audioInput.current?.click();
+              }}
+            >
               Choose audio
             </Button>
-            <Button tone="quiet" onClick={() => setWaiting(null)}>
+            <Button tone="quiet" onClick={() => setWaiting(list => list.filter(item => item !== map))}>
               Cancel
             </Button>
           </div>
         </Card>
-      )}
+      ))}
 
       <AddFromYouTube tab={tab} onFile={() => audioInput.current?.click()} onDropFiles={files => void addFiles(files)} />
       <input
@@ -336,7 +353,7 @@ function JobRow({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
   return (
     <li className="flex items-center gap-4 text-[15px]">
       <span className="w-1/3 min-w-0 truncate">
-        {job.title ?? job.url} · {jobKind(job)}
+        {job.map?.title ?? job.title ?? job.url} · {jobKind(job)}
       </span>
       {job.status === 'error' ? (
         <span className="flex flex-1 items-center justify-between gap-3 text-sm text-danger">
@@ -347,7 +364,7 @@ function JobRow({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
         </span>
       ) : (
         <>
-          <span className="h-2 flex-1 overflow-hidden rounded-full bg-raised" role="progressbar" aria-valuenow={Math.round(job.percent)} aria-label={`${job.title ?? 'Download'} progress`}>
+          <span className="h-2 flex-1 overflow-hidden rounded-full bg-raised" role="progressbar" aria-valuenow={Math.round(job.percent)} aria-label={`${job.map?.title ?? job.title ?? 'Download'} progress`}>
             <span className="block h-full rounded-full bg-accent shadow-glow-sm transition-[width]" style={{ width: `${job.percent}%` }} />
           </span>
           <span className="tabular w-32 text-right text-xs text-muted">{status}</span>

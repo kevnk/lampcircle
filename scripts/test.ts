@@ -98,6 +98,11 @@ same('pad keys from album titles', ['A Pad', 'A# Pad', 'D# Pad', 'C Pad', 'G# Pa
 same('no key in a song title', lib.padKeyFromTitle('Way Maker (Live)'), null);
 same('artist and title from a video title', lib.splitTitle('Leeland - Way Maker (Official Live Video)'), { artist: 'Leeland', title: 'Way Maker' });
 same('album links are playlists', [lib.isPlaylist(lib.PAD_ALBUM.url), lib.isPlaylist('https://music.youtube.com/watch?v=YcNmidI4dAg&si=x')], [true, false]);
+// .djw maps with no audio wait for you to choose it. A second one waits behind the first instead of replacing it.
+const [wayMaker, goodFather] = [{ title: 'Way Maker' }, { title: 'Good Good Father' }] as never[];
+same('a recording goes to the map waiting longest', lib.mapForRecording([wayMaker, goodFather], null), wayMaker);
+same('or to the map you chose audio for', lib.mapForRecording([wayMaker, goodFather], goodFather), goodFather);
+same('a choice that is no longer waiting goes to the oldest', lib.mapForRecording([goodFather], wayMaker), goodFather);
 
 // Keys and theory.
 const D = music.parseKey('D')!;
