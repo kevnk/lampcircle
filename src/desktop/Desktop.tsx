@@ -5,6 +5,7 @@ import { FEEDBACK_MAX, desktop, type UpdateCheck } from '../platform';
 import { captureException, configureCrashReporting } from '../lib/crashReporting';
 import { hrefOf, parseRoute } from '../store';
 import { Button } from '../ui';
+import { openFiles } from '../screens/Library';
 
 /**
  * The Mac app's own chrome, from the TF Mac app template: the menu's Feedback, Keyboard Shortcuts and
@@ -16,9 +17,15 @@ export function Desktop() {
 
   useEffect(() => {
     const stopSettings = desktop.onSettingsChanged(settings => configureCrashReporting(settings.crashReportingEnabled));
-    void desktop
-      .getSettings()
-      .then(async settings => {
+    // A .djw opened from Finder goes to Library, and a launch that opened one skips reopening the last page.
+    const takeOpened = () =>
+      desktop
+        .takeOpenedFiles()
+        .then(files => files.length && openFiles(files.map(file => new File([file.text], file.name))))
+        .catch(error => captureException(error, { mechanism: 'open.files' }));
+    const stopOpened = desktop.onFilesOpened(() => void takeOpened());
+    void Promise.all([desktop.getSettings(), takeOpened()])
+      .then(async ([settings]) => {
         configureCrashReporting(settings.crashReportingEnabled);
         if (settings.openAtLaunch !== 'last-session' || window.location.hash) return;
         const last = await desktop.getLastSession();
@@ -39,6 +46,7 @@ export function Desktop() {
     });
     return () => {
       stopSettings();
+      stopOpened();
       stopCommands();
       window.removeEventListener('hashchange', remember);
     };

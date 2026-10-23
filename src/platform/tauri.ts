@@ -44,4 +44,6 @@ export const desktop: Desktop = {
   saveLastSession: session => invoke<LastSession>('save_last_session', { session }),
   clearLastSession: () => invoke<void>('clear_last_session'),
   exportDiagnostics: () => invoke<DiagnosticsExport | null>('export_diagnostics'),
+  takeOpenedFiles: () => invoke<Array<{ name: string; text: string }>>('take_opened_files'),
+  onFilesOpened: handler => onEvent<null>('files-opened', handler),
 };

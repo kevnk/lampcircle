@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from 'react';
-import { Play, Square, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from 'react';
+import { AudioLines, ListMusic, Play, Search, Square, Trash2 } from 'lucide-react';
 import type { Song } from '../types';
 import { go, useStore } from '../store';
 import { Button, Card, Label, LinkButton, Menu, MenuItem, MiniStrip, RestingBars } from '../ui';
@@ -13,11 +13,23 @@ import { libraryFileName, packLibrary } from '../lib/backup';
 import { isTauri } from '../platform';
 import { download } from '../platform/browser';
 
+/** Files the Mac app was asked to open, like a .djw double-clicked in Finder, waiting for Library to add them. */
+const opened: File[] = [];
+const onOpened = new Set<() => void>();
+
+export function openFiles(files: File[]) {
+  opened.push(...files);
+  go({ page: 'library' });
+  onOpened.forEach(listener => listener());
+}
+
 export function Library() {
   const store = useStore();
   const { songs, pads, sets } = store;
   const [tab, setTab] = useState<'songs' | 'pads'>('songs');
   const [query, setQuery] = useState('');
+  /** The search field shows while it is open or still filtering. */
+  const [searching, setSearching] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   /** .djw maps waiting for you to choose their recordings, oldest first. Each import adds its own row. */
@@ -93,6 +105,23 @@ export function Library() {
     setWaiting(list => [...list, map]);
   };
 
+  const addLatest = useRef(addFiles);
+  addLatest.current = addFiles;
+  useEffect(() => {
+    const take = () => {
+      if (opened.length) void addLatest.current(opened.splice(0));
+    };
+    take();
+    onOpened.add(take);
+    return () => void onOpened.delete(take);
+  }, []);
+
+  const removeSong = (song: Song) => {
+    const inSets = sets.filter(set => set.songIds.includes(song.id)).length;
+    const note = inSets ? ` It also comes out of ${inSets === 1 ? 'its set' : `${inSets} sets`}.` : '';
+    if (confirm(`Remove ${song.title} from your library?${note}`)) void store.removeSong(song.id);
+  };
+
   // ponytail: no export in the Mac app yet. Its save_text takes a string, and a library is hundreds of MB.
   const exportLibrary = async () => {
     const audio: Array<[string, Blob]> = [];
@@ -125,9 +154,52 @@ export function Library() {
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-4xl font-extrabold tracking-tight">Library</h1>
         <div className="flex items-center gap-2">
-          <Button onClick={() => djwInput.current?.click()}>Import .djw</Button>
+          <div className="mr-2 inline-flex rounded-full border border-line p-1" role="group" aria-label="Show">
+            {(
+              [
+                ['songs', `Songs · ${songs.length}`, ListMusic],
+                ['pads', `Pads · ${pads.length}`, AudioLines],
+              ] as const
+            ).map(([id, label, Icon]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={tab === id}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm ${tab === id ? 'bg-accent-soft text-amber ring-1 ring-inset ring-accent/50' : 'text-muted hover:bg-raised hover:text-ink'}`}
+                onClick={() => setTab(id)}
+              >
+                <Icon className="h-4 w-4" aria-hidden />
+                {label}
+              </button>
+            ))}
+          </div>
+          {tab === 'songs' &&
+            (searching || query ? (
+              <input
+                type="search"
+                autoFocus
+                aria-label="Search songs"
+                placeholder="Search songs"
+                value={query}
+                onChange={event => setQuery(event.target.value)}
+                onBlur={() => setSearching(false)}
+                onKeyDown={event => {
+                  if (event.key === 'Escape') {
+                    setQuery('');
+                    setSearching(false);
+                  }
+                }}
+                className="w-52 rounded-full border border-faint bg-well px-4 py-2 text-ink"
+              />
+            ) : (
+              <button type="button" aria-label="Search songs" title="Search songs" className="rounded-full p-2.5 text-muted hover:bg-raised hover:text-ink" onClick={() => setSearching(true)}>
+                <Search className="h-5 w-5" aria-hidden />
+              </button>
+            ))}
           <Button onClick={() => go({ page: 'sets', id: store.newSet().id })}>New set</Button>
           <Menu label="More">
+            <MenuItem onClick={() => djwInput.current?.click()}>Import .djw</MenuItem>
+            <hr className="my-1.5 border-line" />
             {!isTauri() && (
               <MenuItem onClick={() => void exportLibrary()} disabled={!songs.length && !pads.length && !sets.length}>
                 Export library
@@ -208,40 +280,15 @@ export function Library() {
 
       <div className="mt-6 flex flex-col items-start gap-6 lg:flex-row">
         <Card className="w-full min-w-0 flex-1">
-          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line px-4 pt-3">
-            <div className="flex gap-2" role="tablist">
-              {(
-                [
-                  ['songs', `Songs · ${songs.length}`],
-                  ['pads', `Pads · ${new Set(pads.map(pad => pad.tonic)).size} keys`],
-                ] as const
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === id}
-                  className={`border-b-2 px-3.5 pb-3 pt-2 text-[17px] ${tab === id ? 'border-accent font-semibold' : 'border-transparent text-muted hover:text-ink'}`}
-                  onClick={() => setTab(id)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {tab === 'songs' && (
-              <label className="mb-2.5 flex items-center gap-3 text-muted">
-                Search songs
-                <input
-                  type="search"
-                  value={query}
-                  onChange={event => setQuery(event.target.value)}
-                  className="w-52 rounded-full border border-faint bg-well px-4 py-2 text-ink"
-                />
-              </label>
-            )}
-          </div>
           {tab === 'songs' ? (
-            <SongTable songs={shown} selected={selected} onSelect={setSelectedId} onStep={openStep} inSet={id => Boolean(setOf(id))} />
+            <SongTable
+              songs={shown}
+              empty={songs.length ? `No songs match “${query.trim()}”.` : 'No songs yet. Paste a YouTube link above or add an audio file.'}
+              selected={selected}
+              onSelect={setSelectedId}
+              onStep={openStep}
+              inSet={id => Boolean(setOf(id))}
+            />
           ) : (
             <PadTable />
           )}
@@ -252,8 +299,16 @@ export function Library() {
             <Label className="mb-2">Sections</Label>
             <MiniStrip views={sectionViews(selected)} />
             <Button className="mt-5 w-full" onClick={() => go({ page: 'song', id: selected.id, step: 'tap' })}>
-              Open in Map Song
+              Map this Song
             </Button>
+            <button
+              type="button"
+              className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-full px-3 py-2 text-sm text-muted hover:bg-raised hover:text-danger"
+              onClick={() => removeSong(selected)}
+            >
+              <Trash2 className="h-4 w-4" aria-hidden />
+              Remove from library
+            </button>
           </Card>
         )}
       </div>
@@ -374,12 +429,12 @@ function JobRow({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
   );
 }
 
-function SongTable({ songs, selected, onSelect, onStep, inSet }: { songs: Song[]; selected: Song | null; onSelect: (id: string) => void; onStep: (song: Song, step: Step) => void; inSet: (id: string) => boolean }) {
+function SongTable({ songs, empty, selected, onSelect, onStep, inSet }: { songs: Song[]; empty: string; selected: Song | null; onSelect: (id: string) => void; onStep: (song: Song, step: Step) => void; inSet: (id: string) => boolean }) {
   if (songs.length === 0) {
     return (
       <div className="flex flex-col items-center gap-3 px-5 py-10 text-center text-muted">
         <RestingBars />
-        <p>No songs yet. Paste a YouTube link above or add an audio file.</p>
+        <p>{empty}</p>
       </div>
     );
   }

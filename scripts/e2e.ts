@@ -150,14 +150,15 @@ async function main() {
     await waitFor(`/\\d+% · 0:\\d\\d left/.test(document.body.innerText)`, 'download shows percent and time left');
     await waitFor(`document.body.innerText.includes('Songs · 1') && document.body.innerText.includes('Morning Test')`, 'download lands as a song');
     check('artist split from the video title', (await text()).includes('Test Band'));
-    await click('Pads · 0 keys');
+    await click('Pads · 0');
     await click('Get all 12 keys');
     await waitFor(`document.body.innerText.includes('Downloading 12 pads')`, 'the pad album queues 12 pads');
-    await waitFor(`document.body.innerText.includes('Pads · 12 keys') && document.body.innerText.includes('Every key has a pad.')`, 'every key gets a pad from the album', 60000);
+    await waitFor(`document.body.innerText.includes('Pads · 12') && document.body.innerText.includes('Every key has a pad.')`, 'every key gets a pad from the album', 60000);
     check('pad keys read from their titles', (await ev(`document.querySelector('select[aria-label="Key of D# Pad"]').value`)) === '3');
     await click('Songs · 1');
     await setFiles('input[aria-label="Add an audio file"]', [join(work, 'Evening Test.wav')]);
     await waitFor(`document.body.innerText.includes('Songs · 2')`, 'local audio file imports');
+    await clickAt(`document.querySelector('button[aria-label="Search songs"]')`);
     await type('input[type=search]', 'evening');
     check('search filters songs', !(await text()).includes('Morning Test') && (await text()).includes('Evening Test'));
     await ev(`(() => { const i = document.querySelector('input[type=search]'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, ''); i.dispatchEvent(new Event('input', { bubbles: true })); })()`);
@@ -490,7 +491,7 @@ async function main() {
     check('library file name', /\/lampcircle-library-\d{4}-\d\d-\d\d\.lampcircle$/.test(libraryFile), libraryFile);
     await setFiles('input[aria-label="Import a library"]', [libraryFile]);
     await waitFor(`document.body.innerText.includes('Nothing new to add. Everything in that file is already in your library.')`, 'importing the library over itself adds nothing and says so');
-    check('and the library is unchanged', (await text()).includes('Songs · 3') && (await text()).includes('Pads · 12 keys'));
+    check('and the library is unchanged', (await text()).includes('Songs · 3') && (await text()).includes('Pads · 12'));
 
     // Practice a pad.
     await page.send('Page.navigate', { url: `http://localhost:${WEB}/#/sets` });
@@ -499,12 +500,16 @@ async function main() {
     await waitFor(`document.body.textContent.includes('Now sounding') && __djw.session?.snapshot().pad?.tonic === 2`, 'practice opens on the first picked pad');
     check('the set list and the pad grid show the picked pads', (await text()).includes('D · E · D') && (await text()).includes('Your pads, from Sets'));
     await click('Simple');
-    check('simple mode waits on the last picked pad', (await text()).includes('then waits on D.'));
+    check('simple mode ends on the next song', (await text()).includes('then brings in Evening Test.'));
+    await click('Chorus');
     await waitFor(`__djw.session.snapshot().pad?.tonic === 4`, 'and walks on to the next picked pad', 15000);
     await waitFor(`__djw.session.snapshot().pad?.tonic === 2`, 'and on to a key that comes back later', 15000);
-    await sleep(9000);
-    check('then stays on the last pad', await ev<boolean>(`__djw.session.snapshot().pad?.tonic === 2 && !__djw.session.snapshot().pad.next`));
-    await click('Advanced');
+    await waitFor(`__djw.session.snapshot().song?.title === 'Evening Test' && __djw.session.snapshot().song.idx === 1`, 'then brings in the next song at its Start at section', 15000);
+    // Its Chorus runs to the end of the recording, so the song ends on its own about 17 s later.
+    const rise = await waitFor<number>(`(() => { const s = __djw.session; return s.snapshot().song && s.endAt && s.pads[0] ? s.endAt - s.pads[0].at : 0; })()`, 'the pad after the song comes in before it ends', 20000);
+    check('the pad rises over the last 2 bars of the song', Math.abs(rise - 8) < 0.1, rise);
+    // Simple mode is saved, and the pad screen that could switch it back is gone, so put Advanced back by hand.
+    await ev(`localStorage.setItem('djw.perform', JSON.stringify({ ...JSON.parse(localStorage.getItem('djw.perform')), mode: 'advanced' }))`);
     await click('Exit');
     await click('Tap again to stop');
     await waitFor(`document.body.innerText.includes('your pads')`, 'back on sets with picked pads');
@@ -687,13 +692,15 @@ async function main() {
     check('next song lands on a pad bar line', offBar < 5, `${offBar.toFixed(2)} ms`);
     await waitFor(`document.body.innerText.includes('Evening Test') && __djw.session.snapshot().song?.bar >= 1 && __djw.session.snapshot().song.idx === 1`, 'next song plays from the section picked', 12000);
     check('Go to pad still works in the last section', (await ev<boolean>(`${find('Go to pad (D)')}.disabled`)) === false && (await ev<boolean>('__djw.session.snapshot().song.ending')));
-    // The pad kept under the new song fades over 8 bars (32 s at 60 BPM). Turning it off cuts that to 2 bars.
+    // The pad kept under the new song fades out over its first 2 bars (8 s at 60 BPM), and can still be turned off.
     const tailLeft = `Math.max(...__djw.session.fading.map(p => p.until)) - __djw.engine.now()`;
     await waitFor(`${find('Turn pad off')} && __djw.session.snapshot().padFading && !__djw.session.snapshot().pad`, 'the pad kept under the new song can still be turned off');
-    const longTail = await ev<number>(tailLeft);
+    const tail = await ev<number>(tailLeft);
+    const span = await ev<number>(`Math.max(...__djw.session.fading.map(p => p.until)) - __djw.session.segments[0].landingCtx`);
+    check('the pad fades out 2 bars into the next song', Math.abs(span - 8.1) < 0.05, span);
     await click('Turn pad off');
     const shortTail = await ev<number>(tailLeft);
-    check('turning it off cuts its 8-bar fade to 2 bars', longTail > 12 && shortTail < 8.3, [longTail, shortTail]);
+    check('turning it off never makes the fade longer', shortTail <= tail, [tail, shortTail]);
     await waitFor(find('Pad fading out'), 'and says it is fading out');
     await page.send('Emulation.setDeviceMetricsOverride', { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false });
     await shot('8-perform-tablet');
@@ -725,7 +732,7 @@ async function importLibraryFresh() {
     await setFiles('input[aria-label="Import a library"]', [libraryFile]);
     await waitFor(`document.body.innerText.includes('Added 3 songs, 12 pads, 1 set and 15 recordings.')`, 'importing the library file adds every song, pad, set and recording');
     check('they show without a reload', (await text()).includes('Songs · 3') && (await text()).includes('Evening Test'));
-    await click('Open in Map Song');
+    await click('Map this Song');
     await waitFor(`__djw.engine.transport.buffer?.duration > 1`, 'an imported song plays its imported audio');
     await page.send('Page.navigate', { url: `http://localhost:${WEB}/#/sets` });
     await waitFor(`document.querySelector('input[aria-label="Set name"]')?.value === 'Sunday · Test' && document.body.innerText.includes('2 songs · 2 pads')`, 'the set comes across with its songs');

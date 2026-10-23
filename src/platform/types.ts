@@ -100,6 +100,10 @@ export type Desktop = {
   saveLastSession(session: LastSession): Promise<LastSession>;
   clearLastSession(): Promise<void>;
   exportDiagnostics(): Promise<DiagnosticsExport | null>;
+  /** Files Finder asked the app to open, like a double-clicked .djw. Each comes back once. */
+  takeOpenedFiles(): Promise<Array<{ name: string; text: string }>>;
+  /** Finder asked the app to open more files. */
+  onFilesOpened(handler: () => void): () => void;
 };
 
 export const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;

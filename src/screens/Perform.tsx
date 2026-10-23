@@ -20,7 +20,7 @@ interface Prefs {
   fillGaps: boolean;
   fadePause: boolean;
 }
-const DEFAULT_PREFS: Prefs = { mode: 'advanced', changeOn: 'bar', crossfade: 'beat', keepPad: true, padVolume: 0.8, jumpFade: 'out', fillGaps: true, fadePause: true };
+const DEFAULT_PREFS: Prefs = { mode: 'advanced', changeOn: 'bar', crossfade: 'bar', keepPad: true, padVolume: 0.8, jumpFade: 'out', fillGaps: true, fadePause: true };
 /** Bars that Pause fades out over and Resume fades back in over, when fading is on. */
 const PAUSE_FADE = { out: 3, in: 2 };
 
@@ -34,7 +34,10 @@ const option = (active: boolean) => `rounded-full border px-4 py-2.5 ${active ? 
 
 function loadPrefs(): Prefs {
   try {
-    return { ...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem('djw.perform') ?? '{}') };
+    const saved = JSON.parse(localStorage.getItem('djw.perform') ?? '{}');
+    // Saves before v2 wrote down every default, so their 1-beat crossfade was the old default, not a choice.
+    if (!saved.v && saved.crossfade === 'beat') delete saved.crossfade;
+    return { ...DEFAULT_PREFS, ...saved };
   } catch {
     return DEFAULT_PREFS;
   }
@@ -72,7 +75,7 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
     const next = { ...prefs, ...patch };
     setPrefs(next);
     try {
-      localStorage.setItem('djw.perform', JSON.stringify(next));
+      localStorage.setItem('djw.perform', JSON.stringify({ ...next, v: 2 }));
     } catch {
       // Private mode: keep the choice for this visit only.
     }
@@ -127,17 +130,21 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   /** The pad a gap opens on: the first pad you picked that is in the library, or the key the song ends in. */
   const firstPad = (from: Song, to: Song | undefined) => (wayIn(set, from, to).picked ? gapPads(from, to)[0] : undefined) ?? endTonic(from);
 
-  // A song that ends moves the set to its pad. The pad starts unless one is in already, or you turned it off.
+  // A song that ends moves the set to its pad. The pad rises over the song's last 2 bars, unless one is in already or you turned it off.
   useEffect(() => {
     if (!session) return;
+    const padAfter = () => {
+      const index = currentRef.current;
+      const ended = index % 2 === 0 ? items[index / 2] : undefined;
+      return ended && !padOff.current ? firstPad(ended, items[index / 2 + 1]) : null;
+    };
+    session.endPad = padAfter;
     session.onSongEnd = () => {
       const index = currentRef.current;
       if (index % 2 !== 0) return;
-      const ended = items[index / 2];
-      if (!session.snapshot().pad && ended && !padOff.current) {
-        const bar = session.clock?.barLen ?? 2;
-        void session.setPad(firstPad(ended, items[index / 2 + 1]), now(), bar);
-      }
+      const tonic = padAfter();
+      // Only when the pad could not rise before the end.
+      if (!session.snapshot().pad && tonic !== null) void session.setPad(tonic, now(), session.clock?.barLen ?? 2);
       setCurrent(index + 1);
       setMoreOpen(true);
     };
@@ -237,15 +244,17 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
     walkStep.current = null;
   }, [current]);
 
-  // Simple mode walks the way in, one pad every 4 bars.
+  // Simple mode walks the way in, one pad every 4 bars, then brings in the next song from its Start at section.
   const way = gapPads(left, next);
   useEffect(() => {
     if (!session || isSong || prefs.mode !== 'simple' || !snap?.clock || !snap.pad || snap.pad.next) return;
     walkStep.current ??= way.indexOf(snap.pad.tonic);
     const target = way[walkStep.current + 1];
-    if (target === undefined) return;
+    if (target === undefined && !next) return;
     if (lastWalk.current < 0) lastWalk.current = snap.clock.bar;
     if (snap.clock.bar - lastWalk.current >= 4) {
+      // Until the next song has loaded, this tries again each frame.
+      if (target === undefined) return void bringIn();
       lastWalk.current = snap.clock.bar;
       walkStep.current += 1;
       tapPad(target);
@@ -648,7 +657,7 @@ function OnDeck(props: {
   const [open, setOpen] = useState(false);
   const padIn = snap?.pad ?? null;
   const canPad = Boolean(padIn) || have.has(sectionKey);
-  // A pad kept under this song fades for 8 bars, and can still be turned off.
+  // A pad kept under this song fades for 2 bars, and can still be turned off.
   const tail = !padIn && snap?.padFading;
   return (
     <div>
@@ -873,7 +882,10 @@ function PadPanel(props: {
 
       {mode === 'simple' ? (
         <div className="mt-6">
-          <p className="mb-3 text-sm text-muted">The app moves along {props.picked ? 'your pads' : 'this way in'}, one pad every 4 bars, then waits on {way.length ? KEY_NAMES[way[way.length - 1]] : (toName ?? fromName)}.</p>
+          <p className="mb-3 text-sm text-muted">
+            The app moves along {props.picked ? 'your pads' : 'this way in'}, one pad every 4 bars, then{' '}
+            {next ? `brings in ${next.title}.` : `waits on ${way.length ? KEY_NAMES[way[way.length - 1]] : fromName}.`}
+          </p>
           <div className="flex flex-wrap items-center gap-3">
             {way.map((tonic, i) => (
               <span key={`${tonic}-${i}`} className={`rounded-full border px-6 py-3 text-2xl font-bold ${tonic === sounding ? 'border-accent bg-accent text-navy shadow-glow' : 'border-line bg-panel'}`}>
@@ -960,7 +972,7 @@ function BringIn(props: {
           <Mix prefs={prefs} onPrefs={onPrefs} />
           <label className="flex items-start gap-3">
             <input type="checkbox" className="mt-1 h-4 w-4" checked={prefs.keepPad} onChange={event => onPrefs({ keepPad: event.target.checked })} />
-            Keep pad under the song, fade over 8 bars
+            Keep pad under the song, fade over 2 bars
           </label>
         </div>
       )}

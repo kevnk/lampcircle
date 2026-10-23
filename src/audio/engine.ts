@@ -327,6 +327,12 @@ export class PerformSession {
   /** Set by "End song now". Picks and hold no longer apply. */
   forced = false;
   onSongEnd: (() => void) | null = null;
+  /** The pad that takes over when the song ends, or null for none. It rises over the song's last 2 bars. */
+  endPad: (() => number | null) | null = null;
+  /** The pad brought in for the song's end. It fades back out if the song goes on after all. */
+  private endingPad: Promise<PadVoice | null> | null = null;
+  /** setPad calls still loading their recording. */
+  private padLoads = 0;
   /** How jumps between different sections line up their fades. */
   jumpFade: JumpFade = 'edited';
   /** Bring in a pad in the new section's key when a jump would leave silence. */
@@ -386,7 +392,7 @@ export class PerformSession {
     const bar = barSeconds(ps.grid, view.s);
     const earliest = now() + lead + 0.05;
     const landing = this.clock ? clockBoundary(this.clock.anchor, this.clock.barLen, earliest) : earliest;
-    this.fadePads(landing, options.keepPad ? landing + 8 * bar : landing + options.crossfade);
+    this.fadePads(landing, options.keepPad ? landing + 2 * bar : landing + options.crossfade);
     this.startSong(ps, { from: options.from, landingCtx: landing });
     return landing;
   }
@@ -424,7 +430,7 @@ export class PerformSession {
       return null;
     }
     const { landing, fades } = found;
-    this.fadePads(landing, options.keepPad ? landing + 8 * bar : landing + options.crossfade);
+    this.fadePads(landing, options.keepPad ? landing + 2 * bar : landing + options.crossfade);
     this.begin(ps);
     this.enter(from, 1, 'pick', landing, tail, fades);
     // The old song rings out under the new one, then stops.
@@ -451,6 +457,7 @@ export class PerformSession {
     this.forced = false;
     this.only = only;
     this.under = false;
+    this.endingPad = null;
   }
 
   pickSection(idx: number) {
@@ -540,7 +547,12 @@ export class PerformSession {
   }
 
   /** Start or change the pad. The new pad fades in from `at` while the old one fades out. */
-  async setPad(tonic: number, at: number, fade: number): Promise<PadVoice | null> {
+  setPad(tonic: number, at: number, fade: number): Promise<PadVoice | null> {
+    this.padLoads++;
+    return this.loadPad(tonic, at, fade).finally(() => this.padLoads--);
+  }
+
+  private async loadPad(tonic: number, at: number, fade: number): Promise<PadVoice | null> {
     const ticket = ++this.padTicket;
     const blob = await this.padSource(tonic);
     if (!blob || ticket !== this.padTicket) return null;
@@ -685,6 +697,13 @@ export class PerformSession {
     this.planned = null;
     this.endAt = null;
     this.tick();
+    // A pick or hold in the last bars keeps the song going: the pad that was rising for its end goes back out.
+    if (this.endAt === null && this.endingPad) {
+      const pending = this.endingPad;
+      this.endingPad = null;
+      // A pad still loading fades straight back out once it loads, so a pad you asked for meanwhile is not cancelled.
+      void pending.then(pad => pad && this.pads.includes(pad) && this.fadePads(now(), now() + this.padFadeSeconds()));
+    }
   }
 
   /**
@@ -835,6 +854,15 @@ export class PerformSession {
         stop(tail.voice, this.endAt + 0.05);
       }
     }
+    // The pad after the song rises over its last 2 bars, unless a pad is in or on its way. It loads a second ahead.
+    const rise = this.endAt === null ? Infinity : this.endAt - 2 * this.barLen();
+    if (t >= rise - 1 && !this.endingPad && !this.only && this.pads.length === 0 && this.padLoads === 0) {
+      const tonic = this.endPad?.() ?? null;
+      if (tonic !== null && this.endAt !== null) {
+        const at = Math.max(t, rise);
+        this.endingPad = this.setPad(tonic, at, Math.max(this.barLen(), this.endAt - at));
+      }
+    }
     if (this.endAt !== null && t >= this.endAt) this.finishSong();
   }
 
@@ -859,6 +887,7 @@ export class PerformSession {
     this.endAt = null;
     this.ps = null;
     this.under = false;
+    this.endingPad = null;
     this.onSongEnd?.();
   }
 

@@ -31,6 +31,7 @@ npm test && npm run e2e && npm run build    # the web app, unchanged
 | Downloaded files | `library/` in this folder | `~/Library/Application Support/app.truefrontier.lampcircle/library` |
 | Songs, maps, pads, sets | Your browser's IndexedDB | The app's own IndexedDB, under `~/Library/WebKit/app.truefrontier.lampcircle` |
 | Saving a `.djw` | A browser download, or a folder you pick in Chrome | The Mac Save dialog |
+| Opening a `.djw` | More › Import .djw, or drop it on Library | The same, or double-click it in Finder. The app claims `.djw` as its own type (`fileAssociations`, rank Owner), so it is the default |
 | Dropping audio files | Works | Works. Tauri's own drop handling is off (`dragDropEnabled: false`) so the page gets the files |
 
 `src/platform/` is the seam. `platform.helper` and `platform.saveText` pick the browser or the Mac version. Code that only the Mac app runs uses `desktop`, and only `src/desktop/` touches it. Keep `server/index.js` and `downloads.rs` in step when either changes.

@@ -9,8 +9,10 @@ mod storage;
 mod updater;
 
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use error::Result;
+use serde::Serialize;
 use serde_json::Value;
 use tauri::ipc::Channel;
 use tauri::menu::{
@@ -69,6 +71,37 @@ async fn install_update(
 #[tauri::command]
 fn relaunch(app: AppHandle) {
     app.restart()
+}
+
+/// Files Finder asked the app to open, held until the page takes them.
+/// A .djw double-clicked while the app is closed arrives before the page has loaded.
+#[derive(Default)]
+struct OpenedFiles(Mutex<Vec<PathBuf>>);
+
+#[derive(Serialize)]
+struct OpenedFile {
+    name: String,
+    text: String,
+}
+
+#[tauri::command]
+fn take_opened_files(opened: State<'_, OpenedFiles>) -> Vec<OpenedFile> {
+    let paths = std::mem::take(
+        &mut *opened
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()),
+    );
+    paths
+        .into_iter()
+        .filter_map(|path| {
+            let text = std::fs::read_to_string(&path)
+                .map_err(|error| log::warn!("Could not read {}: {error}", path.display()))
+                .ok()?;
+            let name = path.file_name()?.to_string_lossy().into_owned();
+            Some(OpenedFile { name, text })
+        })
+        .collect()
 }
 
 fn focus_main_window(app: &AppHandle) {
@@ -259,6 +292,7 @@ pub fn run() {
 
     builder
         .manage(updater::Pending::default())
+        .manage(OpenedFiles::default())
         .setup(|app| {
             let library = app.path().app_data_dir()?.join("library");
             app.manage::<downloads::Shared>(std::sync::Arc::new(downloads::Downloads::new(library)?));
@@ -294,6 +328,7 @@ pub fn run() {
             check_for_update,
             install_update,
             relaunch,
+            take_opened_files,
             open_settings,
             login_item::set_open_at_login,
             login_item::get_open_at_login,
@@ -314,6 +349,17 @@ pub fn run() {
             tauri::RunEvent::Ready => analytics::track_app_opened(app),
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => focus_main_window(app),
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Opened { urls } => {
+                let paths = urls.into_iter().filter_map(|url| url.to_file_path().ok());
+                app.state::<OpenedFiles>()
+                    .0
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .extend(paths);
+                focus_main_window(app);
+                let _ = app.emit_to("main", "files-opened", ());
+            }
             _ => {}
         });
 }

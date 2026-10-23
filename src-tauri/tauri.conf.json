@@ -41,6 +41,18 @@
     "active": true,
     "targets": ["app", "dmg"],
     "category": "Music",
+    "fileAssociations": [
+      {
+        "ext": ["djw"],
+        "name": "Lamp Circle Song Map",
+        "role": "Editor",
+        "rank": "Owner",
+        "exportedType": {
+          "identifier": "app.truefrontier.lampcircle.djw",
+          "conformsTo": ["public.yaml"]
+        }
+      }
+    ],
     "macOS": {
       "minimumSystemVersion": "12.0"
     },
