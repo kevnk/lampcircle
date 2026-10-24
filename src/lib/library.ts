@@ -37,9 +37,21 @@ export function jobKind(job: Job): 'song' | 'pad' {
   return job.kind ?? (/\bpads?\b/i.test(job.title ?? '') ? 'pad' : 'song');
 }
 
-/** The waiting .djw map a recording goes to: the one you chose audio for, else the one waiting longest. */
-export function mapForRecording(waiting: DjwMap[], chosen: DjwMap | null): DjwMap | undefined {
-  return waiting.find(map => map === chosen) ?? waiting[0];
+const squash = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** A recording's file name is the map's saved audio file, or has the song's title in it. */
+export function namesMap(map: DjwMap, fileName: string): boolean {
+  const name = squash(fileName);
+  const title = squash(map.title);
+  return (map.audioFile !== undefined && squash(map.audioFile.split(/[\\/]/).pop()!) === name) || (title !== '' && name.includes(title));
+}
+
+/**
+ * The waiting .djw map a recording goes to: the one you chose audio for, else, given the recording's
+ * file name, the map it names, else the one waiting longest.
+ */
+export function mapForRecording(waiting: DjwMap[], chosen: DjwMap | null, fileName?: string): DjwMap | undefined {
+  return waiting.find(map => map === chosen) ?? (fileName ? waiting.find(map => namesMap(map, fileName)) : undefined) ?? waiting[0];
 }
 
 /** Turn a finished download into a song or pad. */

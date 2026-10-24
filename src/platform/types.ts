@@ -106,4 +106,20 @@ export type Desktop = {
   onFilesOpened(handler: () => void): () => void;
 };
 
+/** The iPhone and iPad features, from src-tauri/src/ios.rs. Only code that runs on iOS touches these. */
+export type Mobile = {
+  /** The Files picker, for recordings and .djw maps. No files when the person cancels. */
+  pickImportFiles(): Promise<File[]>;
+  /** Keeps the screen on, for Perform. */
+  setKeepAwake(enabled: boolean): Promise<void>;
+  /** Debug builds only: the files in <app data>/dev-seed, once, and route.txt. Rejects in a release build. */
+  takeDevSeed(): Promise<{ files: File[]; route?: string }>;
+};
+
 export const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+// iPadOS web views say Macintosh, so a touch screen tells an iPad from the Mac app.
+const IOS = isTauri() && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1));
+
+/** The app on an iPhone or iPad. The Mac app and the web app are never this. */
+export const isIOS = (): boolean => IOS;
