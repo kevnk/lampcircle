@@ -58,7 +58,8 @@
     },
     "iOS": {
       "minimumSystemVersion": "16.0",
-      "developmentTeam": "RTA9834VTV"
+      "developmentTeam": "RTA9834VTV",
+      "frameworks": ["AVFAudio"]
     },
     "icon": [
       "icons/32x32.png",

@@ -36,6 +36,11 @@ tauri-plugin-autostart = "2"
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "AVAudioSession", "AVAudioSessionTypes"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIApplication", "UIResponder", "UIScrollView", "UIView"] }
+
 [features]
 default = ["aptabase"]
 aptabase = ["dep:freshjuice-tauri-aptabase"]

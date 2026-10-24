@@ -3,6 +3,7 @@ mod diagnostics;
 mod downloads;
 mod error;
 mod feedback;
+mod ios;
 mod login_item;
 mod session;
 mod storage;
@@ -314,6 +315,8 @@ pub fn run() {
         .setup(|app| {
             let library = app.path().app_data_dir()?.join("library");
             app.manage::<downloads::Shared>(std::sync::Arc::new(downloads::Downloads::new(library)?));
+            #[cfg(target_os = "ios")]
+            ios::setup(app);
             #[cfg(desktop)]
             build_menu(app.handle())?;
             log::info!(target: diagnostics::SUPPORT_LOG_TARGET, "application_ready");
@@ -366,6 +369,10 @@ pub fn run() {
             downloads::remove_download,
             downloads::library_file,
             downloads::save_text,
+            ios::pick_import_files,
+            ios::set_keep_awake,
+            #[cfg(all(debug_assertions, target_os = "ios"))]
+            ios::take_dev_seed,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -12,6 +12,7 @@
 		48E58DB93FE34665508C5390 /* MetalKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BBAAF616DE2495E3CB9DB88D /* MetalKit.framework */; };
 		4F9DFECC58C327F7C4C9F5F7 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E2D3DA6C9D30E67FFC0C41B9 /* CoreGraphics.framework */; };
 		57B6F813FC20308509316F45 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CBFB01ACA9E7E11D6E0BB5C7 /* UIKit.framework */; };
+		21437D6CBAC0981CCF577B8B /* AVFAudio.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1DD7AA2FAD654535D860562A /* AVFAudio.framework */; };
 		6C788D2F5E9BE4AC66EB4626 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 8D793DC8D8BBE96F8CB8856A /* WebKit.framework */; };
 		838D5CF9766CD1B77B79DBCA /* QuartzCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F38FF4F21CF3E30473104F34 /* QuartzCore.framework */; };
 		873D926035365FFC92FF4747 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = CFEA993186517AC28892EF83 /* LaunchScreen.storyboard */; };
@@ -41,6 +42,7 @@
 		BBAAF616DE2495E3CB9DB88D /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		C3BC7A5AE69878D20B1417A5 /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		CBFB01ACA9E7E11D6E0BB5C7 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		1DD7AA2FAD654535D860562A /* AVFAudio.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFAudio.framework; path = System/Library/Frameworks/AVFAudio.framework; sourceTree = SDKROOT; };
 		CFEA993186517AC28892EF83 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		D77DD8AF91C1EE63FA4868AF /* main.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = main.mm; sourceTree = "<group>"; };
 		D93F5BBE08947C0246BDC92C /* lampcircle_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = lampcircle_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -63,6 +65,7 @@
 				838D5CF9766CD1B77B79DBCA /* QuartzCore.framework in Frameworks */,
 				8DA18ECD23B1922128269A0D /* Security.framework in Frameworks */,
 				57B6F813FC20308509316F45 /* UIKit.framework in Frameworks */,
+				21437D6CBAC0981CCF577B8B /* AVFAudio.framework in Frameworks */,
 				6C788D2F5E9BE4AC66EB4626 /* WebKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -80,6 +83,7 @@
 				F38FF4F21CF3E30473104F34 /* QuartzCore.framework */,
 				A03DDD9A0B4058E0B1399418 /* Security.framework */,
 				CBFB01ACA9E7E11D6E0BB5C7 /* UIKit.framework */,
+				1DD7AA2FAD654535D860562A /* AVFAudio.framework */,
 				8D793DC8D8BBE96F8CB8856A /* WebKit.framework */,
 			);
 			name = Frameworks;

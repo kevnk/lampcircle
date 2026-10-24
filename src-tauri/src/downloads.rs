@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-#[cfg(desktop)]
+#[cfg(any(desktop, target_os = "ios"))]
 use tauri::Manager;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
@@ -363,6 +363,7 @@ pub async fn library_file(downloads: State<'_, Shared>, file_name: String) -> Re
 }
 
 /// Asks where to save `text`, then writes it. False when the person cancels.
+#[cfg(not(target_os = "ios"))]
 #[tauri::command]
 pub async fn save_text(app: AppHandle, file_name: String, text: String) -> Result<bool> {
     let mut dialog = app.dialog().file().set_file_name(&file_name);
@@ -381,6 +382,18 @@ pub async fn save_text(app: AppHandle, file_name: String, text: String) -> Resul
         .map_err(|_| AppError::Message("Pick a folder on this Mac.".into()))?;
     std::fs::write(destination, text)?;
     Ok(true)
+}
+
+/// iOS can only export a file that already exists: its save dialog sends out the file in Documents
+/// with this name, so `text` goes there first. False when the person cancels.
+#[cfg(target_os = "ios")]
+#[tauri::command]
+pub async fn save_text(app: AppHandle, file_name: String, text: String) -> Result<bool> {
+    let staged = app.path().document_dir()?.join(&file_name);
+    std::fs::write(&staged, text)?;
+    let saved = app.dialog().file().set_file_name(&file_name).blocking_save_file().is_some();
+    let _ = std::fs::remove_file(&staged);
+    Ok(saved)
 }
 
 #[cfg(test)]
