@@ -28,6 +28,57 @@ export function LinkButton({ className = '', ...props }: ButtonHTMLAttributes<HT
   return <button type="button" className={`font-medium text-amber underline decoration-amber/40 underline-offset-4 hover:decoration-amber ${className}`} {...props} />;
 }
 
+/**
+ * Acts only after a press held for `ms`, filling in as it goes, so a stray touch cannot stop a song.
+ * Sliding off by more than a fingertip lets go. A keyboard press acts at once.
+ */
+export function HoldButton(props: { onConfirm: () => void; ms?: number; disabled?: boolean; className?: string; children: ReactNode }) {
+  const { onConfirm, ms = 600, disabled, className = '', children } = props;
+  const [holding, setHolding] = useState(false);
+  const press = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const letGo = () => {
+    if (press.current) window.clearTimeout(press.current.timer);
+    press.current = null;
+    setHolding(false);
+  };
+  useEffect(() => () => window.clearTimeout(press.current?.timer), []);
+  return (
+    <button
+      type="button"
+      title="Press and hold"
+      disabled={disabled}
+      className={`relative touch-none overflow-hidden ${className}`}
+      onPointerDown={event => {
+        if (event.button !== 0) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const timer = window.setTimeout(() => {
+          letGo();
+          onConfirm();
+        }, ms);
+        press.current = { timer, x: event.clientX, y: event.clientY };
+        setHolding(true);
+      }}
+      onPointerMove={event => {
+        const start = press.current;
+        if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) letGo();
+      }}
+      onPointerUp={letGo}
+      onPointerCancel={letGo}
+      onContextMenu={event => event.preventDefault()}
+      onClick={event => {
+        if (event.detail === 0) onConfirm();
+      }}
+    >
+      <span
+        className="absolute inset-y-0 left-0 bg-danger/30"
+        style={{ width: holding ? '100%' : '0%', transition: holding ? `width ${ms}ms linear` : 'none' }}
+        aria-hidden
+      />
+      <span className="relative inline-flex items-center justify-center gap-2">{children}</span>
+    </button>
+  );
+}
+
 /** Heights of the logo's sound bars, quieted down. The short one in the middle stays lit, like an ember. */
 const RESTING = [14, 22, 34, 20, 12, 20, 34, 22, 14];
 
