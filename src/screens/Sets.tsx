@@ -1,7 +1,8 @@
 import { useMemo, useState, type KeyboardEvent } from 'react';
-import { Menu as Handle, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Menu as Handle, X } from 'lucide-react';
 import type { Song, WorshipSet } from '../types';
 import { go, useStore } from '../store';
+import { isIOS } from '../platform';
 import { Button, Card, LinkButton, Menu, MenuItem, RestingBars } from '../ui';
 import { KEY_NAMES, padFit, padGroups, route, tempoNote } from '../lib/music';
 import { bpmOf, isReady, keyOf, keysText, planSeconds, planText, songGrid, songKeys } from '../lib/songMap';
@@ -197,21 +198,33 @@ export function Sets({ id }: { id?: string }) {
               >
                 <div
                   className={`flex items-start gap-4 rounded-2xl border border-line bg-panel px-4 py-3.5 ${dragging === i ? 'opacity-50' : ''}`}
-                  draggable
+                  draggable={!isIOS()}
                   onDragStart={() => setDragging(i)}
                   onDragEnd={() => setDragging(null)}
                 >
-                  <button
-                    type="button"
-                    className="mt-1.5 cursor-grab text-faint hover:text-ink"
-                    aria-label={`Move ${song.title}. Use the up and down arrows.`}
-                    onKeyDown={(event: KeyboardEvent) => {
-                      if (event.key === 'ArrowUp') move(i, i - 1);
-                      if (event.key === 'ArrowDown') move(i, i + 1);
-                    }}
-                  >
-                    <Handle className="h-5 w-5" />
-                  </button>
+                  {isIOS() ? (
+                    // Touch has no drag and drop here, so each song moves a place at a time.
+                    <div className="-my-1.5 -ml-2 flex flex-col">
+                      <button type="button" className="text-faint disabled:opacity-30" aria-label={`Move ${song.title} up`} disabled={i === 0} onClick={() => move(i, i - 1)}>
+                        <ChevronUp className="h-5 w-5" />
+                      </button>
+                      <button type="button" className="text-faint disabled:opacity-30" aria-label={`Move ${song.title} down`} disabled={i === items.length - 1} onClick={() => move(i, i + 1)}>
+                        <ChevronDown className="h-5 w-5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="mt-1.5 cursor-grab text-faint hover:text-ink"
+                      aria-label={`Move ${song.title}. Use the up and down arrows.`}
+                      onKeyDown={(event: KeyboardEvent) => {
+                        if (event.key === 'ArrowUp') move(i, i - 1);
+                        if (event.key === 'ArrowDown') move(i, i + 1);
+                      }}
+                    >
+                      <Handle className="h-5 w-5" />
+                    </button>
+                  )}
                   <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-accent font-bold text-amber shadow-glow-sm">{i + 1}</span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-baseline justify-between gap-x-4">
@@ -228,7 +241,7 @@ export function Sets({ id }: { id?: string }) {
                     <X className="h-4 w-4" />
                   </button>
                 </div>
-                <div className="ml-[3.9rem] border-l-2 border-dashed border-accent/40 py-2.5 pl-6">
+                <div className="ml-[3.9rem] border-l-2 border-dashed border-accent/40 py-2.5 pl-6 ios:max-sm:ml-5 ios:max-sm:pl-3">
                   <div className="rounded-2xl border border-dashed border-accent/40 bg-accent/[0.06] px-4 py-3">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
                       <span className="caps text-amber">Live pad</span>

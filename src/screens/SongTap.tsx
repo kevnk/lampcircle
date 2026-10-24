@@ -4,6 +4,7 @@ import type { Section, SectionType, Song, Tap } from '../types';
 import { go, useStore } from '../store';
 import { Button, Card, LinkButton, Menu, MenuItem, SongHeader, StepPills, Stepper, beatsLabel, shadeClass, useFrame, useKeys, type StepName } from '../ui';
 import { transport } from '../audio/engine';
+import { isIOS } from '../platform';
 import { KEY_NAMES, detectKey, keyName } from '../lib/music';
 import { sectionChroma, snapToOnset, type Onsets } from '../lib/analysis';
 import { onsetsOf } from '../lib/library';
@@ -27,6 +28,8 @@ import {
   unmarked,
   type SectionView,
 } from '../lib/songMap';
+
+const ios = isIOS();
 
 type Tool = 'select' | 'cut';
 const TOOLS = [
@@ -216,7 +219,7 @@ export function SongTap({ song }: { song: Song }) {
       </SongHeader>
 
       <Card className="px-5 pb-5 pt-4">
-        <div className="mb-4 flex items-center gap-5">
+        <div className="mb-4 flex items-center gap-5 ios:flex-wrap ios:gap-3">
           <Button tone="lantern" className="px-5" onClick={() => transport.toggle()} disabled={!loaded} aria-label={transport.playing ? 'Pause' : 'Play'}>
             {transport.playing ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
             {transport.playing ? 'Pause' : 'Play'}
@@ -225,7 +228,7 @@ export function SongTap({ song }: { song: Song }) {
             {clock(pos)}
             {at && at.bar > 0 ? ` · bar ${at.bar} · beat ${at.beat}` : ''}
           </p>
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-1 ios:flex-wrap">
             <div className="mr-2 inline-flex rounded-full border border-line p-1" role="group" aria-label="Section tool">
               {TOOLS.map(([value, label, Icon, key, help]) => (
                 <button
@@ -306,7 +309,7 @@ export function SongTap({ song }: { song: Song }) {
           />
           {selected && <SectionInspector song={song} view={selected} save={save} loaded={loaded} onRetap={() => retapSection(selected)} onClose={() => setSelectedId(null)} />}
         </div>
-        <p className="mt-3 text-right text-xs text-muted">
+        <p className="mt-3 text-right text-xs text-muted ios:hidden">
           V select · C cut · ← → bar · ↑ ↓ section · 0 or Home start of song · Enter play or pause · Backspace undo
         </p>
       </Card>
@@ -316,13 +319,26 @@ export function SongTap({ song }: { song: Song }) {
           <h2 className="mb-4 text-xl font-bold"><span className="text-amber">1</span> · Tap the beat</h2>
           <button
             type="button"
-            className={`w-full rounded-2xl border-2 px-3 py-7 text-center transition ${flash ? 'border-accent bg-accent-soft shadow-glow' : 'border-accent/40 bg-well hover:border-accent/70'}`}
-            onClick={event => tap(event.shiftKey, event.timeStamp)}
+            className={`w-full rounded-2xl border-2 px-3 py-7 text-center transition ${flash ? 'border-accent bg-accent-soft shadow-glow' : 'border-accent/40 bg-well hover:border-accent/70'} ios:py-12`}
+            // A touch counts as it lands, not when the finger lifts.
+            onClick={ios ? undefined : event => tap(event.shiftKey, event.timeStamp)}
+            onPointerDown={ios ? event => tap(false, event.timeStamp) : undefined}
             disabled={!loaded}
           >
             <span className="block pl-[0.3em] text-4xl font-black tracking-[0.3em] text-amber">TAP</span>
-            <span className="mt-3 block whitespace-nowrap text-[13px] text-muted">Space on every beat · Shift+Space on beat 1</span>
+            <span className="mt-3 block whitespace-nowrap text-[13px] text-muted">{ios ? 'Tap on every beat' : 'Space on every beat · Shift+Space on beat 1'}</span>
           </button>
+          {ios && (
+            // There is no Shift to hold on a phone, so beat 1 has its own pad.
+            <button
+              type="button"
+              className="mt-3 w-full rounded-2xl border-2 border-accent/40 bg-well py-4 text-lg font-bold text-amber"
+              onPointerDown={event => tap(true, event.timeStamp)}
+              disabled={!loaded}
+            >
+              Tap beat 1
+            </button>
+          )}
           {retap && (
             <p className="mt-3 text-sm text-amber" aria-live="polite">
               Re-tapping {retap.label}. New taps replace the old ones as you go. <LinkButton onClick={() => transport.pause()}>Stop</LinkButton>
@@ -386,8 +402,9 @@ export function SongTap({ song }: { song: Song }) {
           </div>
           {hint && <p className="mt-3 text-sm text-amber">{hint}</p>}
 
-          <table className="mt-6 w-full text-left">
-            <thead>
+          {/* On a phone each section's row stacks: its label and key, then its buttons. */}
+          <table className="mt-6 w-full text-left ios:max-sm:block">
+            <thead className="ios:max-sm:hidden">
               <tr className="caps border-b border-line text-muted">
                 <th className="py-2">Section</th>
                 <th className="py-2">Key (found by the app)</th>
@@ -396,7 +413,7 @@ export function SongTap({ song }: { song: Song }) {
                 </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="ios:max-sm:block">
               {views.map(view => (
                 <SectionRow key={view.section.id} song={song} view={view} save={save} loaded={loaded} selected={view === selected} onRetap={() => retapSection(view)} />
               ))}
@@ -495,7 +512,7 @@ function SectionInspector({ song, view, save, loaded, onRetap, onClose }: Edit &
     <div
       role="dialog"
       aria-label={`${view.name} settings`}
-      className="absolute top-full z-20 mt-2 w-80 rounded-2xl border border-edge bg-panel p-4 shadow-2xl shadow-navy/15 dark:shadow-black/60"
+      className="absolute top-full z-20 mt-2 w-80 rounded-2xl border border-edge bg-panel p-4 shadow-2xl shadow-navy/15 dark:shadow-black/60 ios:max-w-full"
       style={{ left: `clamp(0px, calc(${center}% - 10rem), calc(100% - 20rem))` }}
     >
       <div className="mb-3 flex items-center gap-2">
@@ -567,8 +584,8 @@ function SectionInspector({ song, view, save, loaded, onRetap, onClose }: Edit &
 
 function SectionRow({ song, view, save, loaded, selected, onRetap }: Edit & { loaded: boolean; selected: boolean; onRetap: () => void }) {
   return (
-    <tr className={`border-b border-line ${selected ? 'bg-accent-soft shadow-[inset_3px_0_0_rgb(var(--accent))]' : ''}`}>
-      <td className="py-2">
+    <tr className={`border-b border-line ${selected ? 'bg-accent-soft shadow-[inset_3px_0_0_rgb(var(--accent))]' : ''} ios:max-sm:flex ios:max-sm:flex-wrap ios:max-sm:items-center ios:max-sm:gap-x-3`}>
+      <td className="py-2 ios:max-sm:flex-1">
         <TypeSelect song={song} view={view} save={save} />
         <span className="ml-2 tabular text-xs text-muted">
           bars {view.s + 1}–{view.e}
@@ -577,7 +594,7 @@ function SectionRow({ song, view, save, loaded, selected, onRetap }: Edit & { lo
       <td className="py-2">
         <KeySelect song={song} view={view} save={save} />
       </td>
-      <td className="py-2">
+      <td className="py-2 ios:max-sm:basis-full ios:max-sm:pt-0">
         <div className="flex items-center justify-end text-muted">
           <button
             type="button"

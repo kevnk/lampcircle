@@ -6,14 +6,16 @@ import { Export } from './screens/Export';
 import { Sets } from './screens/Sets';
 import { Perform } from './screens/Perform';
 import { RestingBars, ThemeSwitch } from './ui';
-import { isTauri } from './platform';
+import { isIOS, isTauri } from './platform';
 import { Desktop } from './desktop/Desktop';
+import { Mobile, ReadOnlyMap, TabBar } from './mobile/Mobile';
 
 export default function App() {
   return (
     <StoreProvider>
       <Shell />
       {isTauri() && <Desktop />}
+      {isIOS() && <Mobile />}
     </StoreProvider>
   );
 }
@@ -31,6 +33,20 @@ function Shell() {
     );
   }
   if (route.page === 'perform') return <Perform key={`${route.setId}`} setId={route.setId} item={route.item} />;
+  // iPhone and iPad: one column inside the safe areas, with tabs along the bottom.
+  if (isIOS()) {
+    return (
+      <>
+        <main className="min-w-0 pb-[calc(6rem_+_env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pt-[calc(1rem_+_env(safe-area-inset-top))]">
+          <Page route={route} />
+          <div className="mt-10 max-w-xs">
+            <ThemeSwitch />
+          </div>
+        </main>
+        <TabBar route={route} />
+      </>
+    );
+  }
   return (
     <div className="flex min-h-full">
       {/* The Mac app has no title bar, so the window drags from the top edge. */}
@@ -49,6 +65,7 @@ function Page({ route }: { route: Route }) {
   if (route.page === 'song') {
     const song = songs.find(item => item.id === route.id);
     if (!song) return <p className="text-muted">That song is not in your library.</p>;
+    if (isIOS() && route.step !== 'tap') return <ReadOnlyMap song={song} step={route.step} />;
     if (route.step === 'refine') return <Refine song={song} />;
     if (route.step === 'export') return <Export song={song} />;
     return <SongTap key={song.id} song={song} />;
