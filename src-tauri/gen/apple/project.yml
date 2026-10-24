@@ -12,6 +12,7 @@ settingGroups:
     base:
       PRODUCT_NAME: Lamp Circle
       PRODUCT_BUNDLE_IDENTIFIER: app.truefrontier.lampcircle
+      DEVELOPMENT_TEAM: RTA9834VTV
 targetTemplates:
   app:
     type: application
