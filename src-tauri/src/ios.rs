@@ -11,7 +11,9 @@ use tauri_plugin_dialog::DialogExt;
 use crate::error::{AppError, Result};
 
 /// What Library adds: recordings, and the .djw maps that go with them.
-const IMPORT_TYPES: &[&str] = &["mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "djw"];
+const IMPORT_TYPES: &[&str] = &[
+    "mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "djw",
+];
 
 #[derive(Serialize)]
 struct Header {
@@ -29,12 +31,15 @@ struct Entry {
 /// Files for the page in one binary body, since JSON would spell out every byte as a number:
 /// the header's length as a little-endian u32, the JSON header, then each file's bytes in header order.
 /// `unpack` in src/platform/tauri.ts reads it.
-fn framed(route: Option<String>, files: Vec<(String, Vec<u8>)>) -> Result<Response> {
+fn frame(route: Option<String>, files: Vec<(String, Vec<u8>)>) -> Result<Vec<u8>> {
     let header = serde_json::to_vec(&Header {
         route,
         files: files
             .iter()
-            .map(|(name, bytes)| Entry { name: name.clone(), size: bytes.len() })
+            .map(|(name, bytes)| Entry {
+                name: name.clone(),
+                size: bytes.len(),
+            })
             .collect(),
     })?;
     let size = files.iter().map(|(_, bytes)| bytes.len()).sum::<usize>();
@@ -44,7 +49,7 @@ fn framed(route: Option<String>, files: Vec<(String, Vec<u8>)>) -> Result<Respon
     for (_, bytes) in files {
         body.extend_from_slice(&bytes);
     }
-    Ok(Response::new(body))
+    Ok(body)
 }
 
 /// Opens the Files picker for recordings and .djw maps, several at once. No files when the person cancels.
@@ -62,13 +67,17 @@ pub async fn pick_import_files(app: AppHandle) -> Result<Response> {
         let path = file
             .into_path()
             .map_err(|_| AppError::Message("Pick a file on this device.".into()))?;
-        let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
         files.push((name, std::fs::read(&path)?));
         // iOS hands over copies in the app's temporary folder. Anywhere else this is the person's own file.
         #[cfg(target_os = "ios")]
         let _ = std::fs::remove_file(&path);
     }
-    framed(None, files)
+    Ok(Response::new(frame(None, files)?))
 }
 
 /// Keeps the screen on while Perform is open, so the phone never locks mid-song. Nothing to do on the Mac.
@@ -93,13 +102,17 @@ pub async fn take_dev_seed(app: AppHandle) -> Result<Response> {
     let folder = app.path().app_data_dir()?.join("dev-seed");
     if !folder.is_dir() {
         log::info!("No dev seed at {}", folder.display());
-        return framed(None, Vec::new());
+        return Ok(Response::new(frame(None, Vec::new())?));
     }
     let mut route = None;
     let mut files = Vec::new();
     for entry in std::fs::read_dir(&folder)? {
         let path = entry?.path();
-        let name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
         if !path.is_file() || name.starts_with('.') {
             continue;
         }
@@ -114,16 +127,16 @@ pub async fn take_dev_seed(app: AppHandle) -> Result<Response> {
     let done = folder.with_file_name("dev-seed.done");
     let _ = std::fs::remove_dir_all(&done);
     std::fs::rename(&folder, &done)?;
-    framed(route, files)
+    Ok(Response::new(frame(route, files)?))
 }
 
 /// Playback keeps the music going with the ring/silent switch on, and, with UIBackgroundModes audio,
 /// when the screen locks. The page pads itself with env(safe-area-inset-*), so the web view must not inset it too.
 #[cfg(target_os = "ios")]
 pub fn setup(app: &tauri::App) {
+    use objc2::msg_send;
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
-    use objc2::msg_send;
     use objc2_avf_audio::{AVAudioSession, AVAudioSessionCategoryPlayback};
     use objc2_ui_kit::{UIScrollView, UIScrollViewContentInsetAdjustmentBehavior};
 
@@ -131,7 +144,9 @@ pub fn setup(app: &tauri::App) {
     unsafe {
         let session = AVAudioSession::sharedInstance();
         let started = match AVAudioSessionCategoryPlayback {
-            Some(playback) => session.setCategory_error(playback).and_then(|()| session.setActive_error(true)),
+            Some(playback) => session
+                .setCategory_error(playback)
+                .and_then(|()| session.setActive_error(true)),
             None => Ok(()),
         };
         if let Err(error) = started {
@@ -148,11 +163,43 @@ pub fn setup(app: &tauri::App) {
             let wk_webview = &*webview.inner().cast::<AnyObject>();
             let scroll: Option<Retained<UIScrollView>> = msg_send![wk_webview, scrollView];
             if let Some(scroll) = scroll {
-                scroll.setContentInsetAdjustmentBehavior(UIScrollViewContentInsetAdjustmentBehavior::Never);
+                scroll.setContentInsetAdjustmentBehavior(
+                    UIScrollViewContentInsetAdjustmentBehavior::Never,
+                );
             }
         }
     });
     if let Err(error) = insets {
         log::warn!("Could not hand the safe areas to the page: {error}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frame;
+
+    #[test]
+    fn frames_the_header_then_each_file() {
+        let body = frame(
+            Some("tap".into()),
+            vec![
+                ("a.djw".into(), b"djw: 2".to_vec()),
+                ("b.mp3".into(), vec![0, 255]),
+            ],
+        )
+        .unwrap();
+        let header =
+            br#"{"route":"tap","files":[{"name":"a.djw","size":6},{"name":"b.mp3","size":2}]}"#;
+        let mut expected = (header.len() as u32).to_le_bytes().to_vec();
+        expected.extend_from_slice(header);
+        expected.extend_from_slice(b"djw: 2");
+        expected.extend_from_slice(&[0, 255]);
+        assert_eq!(body, expected);
+    }
+
+    #[test]
+    fn frames_no_route_and_no_files() {
+        let body = frame(None, Vec::new()).unwrap();
+        assert_eq!(&body[4..], br#"{"files":[]}"#);
     }
 }
