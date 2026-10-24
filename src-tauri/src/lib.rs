@@ -15,10 +15,13 @@ use error::Result;
 use serde::Serialize;
 use serde_json::Value;
 use tauri::ipc::Channel;
+#[cfg(desktop)]
 use tauri::menu::{
     AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder,
 };
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, State};
+#[cfg(desktop)]
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
 
 pub(crate) fn settings_path(app: &AppHandle) -> Result<PathBuf> {
@@ -104,6 +107,7 @@ fn take_opened_files(opened: State<'_, OpenedFiles>) -> Vec<OpenedFile> {
         .collect()
 }
 
+#[cfg(desktop)]
 fn focus_main_window(app: &AppHandle) {
     let mut restored = true;
     #[cfg(target_os = "macos")]
@@ -156,6 +160,7 @@ fn focus_main_window(app: &AppHandle) {
     }
 }
 
+#[cfg(desktop)]
 fn show_settings(app: &AppHandle) -> Result<()> {
     if let Some(window) = app.get_webview_window("settings") {
         window.show()?;
@@ -182,11 +187,20 @@ fn show_settings(app: &AppHandle) -> Result<()> {
     Ok(())
 }
 
+// iPhone and iPad have one window, so Settings cannot open in its own.
+#[cfg(mobile)]
+fn show_settings(_app: &AppHandle) -> Result<()> {
+    Err(error::AppError::Message(
+        "Settings open in their own window only on the Mac.".into(),
+    ))
+}
+
 #[tauri::command]
 fn open_settings(app: AppHandle) -> Result<()> {
     show_settings(&app)
 }
 
+#[cfg(desktop)]
 fn build_menu(app: &AppHandle) -> tauri::Result<()> {
     let about = PredefinedMenuItem::about(
         app,
@@ -272,7 +286,10 @@ pub fn run() {
                 ])
                 .build(),
         )
-        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_opener::init());
+
+    #[cfg(desktop)]
+    let builder = builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         // The LaunchAgent file is named after the app. It keeps the name from before "Lamp Circle",
         // so an Open at Login turned on then still reads as on and can be turned off.
@@ -281,8 +298,9 @@ pub fn run() {
                 .macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent)
                 .app_name("Lampcircle")
                 .build(),
-        )
-        .plugin(tauri_plugin_dialog::init());
+        );
+
+    let builder = builder.plugin(tauri_plugin_dialog::init());
 
     #[cfg(feature = "aptabase")]
     let builder = match analytics::APP_KEY.filter(|key| !key.trim().is_empty()) {
@@ -290,14 +308,16 @@ pub fn run() {
         None => builder,
     };
 
-    builder
+    let builder = builder
         .manage(updater::Pending::default())
         .manage(OpenedFiles::default())
         .setup(|app| {
             let library = app.path().app_data_dir()?.join("library");
             app.manage::<downloads::Shared>(std::sync::Arc::new(downloads::Downloads::new(library)?));
+            #[cfg(desktop)]
             build_menu(app.handle())?;
             log::info!(target: diagnostics::SUPPORT_LOG_TARGET, "application_ready");
+            #[cfg(desktop)]
             app.on_menu_event(|app, event| match event.id().0.as_str() {
                 "settings" => {
                     let _ = show_settings(app);
@@ -311,16 +331,20 @@ pub fn run() {
                 }
             });
             Ok(())
-        })
-        // Closing the main window hides it, so a stray Cmd+W mid-set keeps the music going. The Dock icon brings it back.
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
+        });
+
+    // Closing the main window hides it, so a stray Cmd+W mid-set keeps the music going. The Dock icon brings it back.
+    #[cfg(desktop)]
+    let builder = builder.on_window_event(|window, event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            if window.label() == "main" {
+                api.prevent_close();
+                let _ = window.hide();
             }
-        })
+        }
+    });
+
+    builder
         .invoke_handler(tauri::generate_handler![
             get_settings,
             save_settings,

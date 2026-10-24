@@ -6,6 +6,8 @@ library
 .env
 .env.local
 src-tauri/target
-src-tauri/gen
+# gen/apple is the Xcode project Tauri wants committed. Its own .gitignore skips build/, Externals/ and xcuserdata/.
+src-tauri/gen/*
+!src-tauri/gen/apple
 src-tauri/.cargo/config.toml
 *.key

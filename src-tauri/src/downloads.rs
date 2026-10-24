@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use tauri::{AppHandle, Manager, State};
+#[cfg(desktop)]
+use tauri::Manager;
+use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
 const NOT_INSTALLED: &str =
@@ -367,6 +369,7 @@ pub async fn save_text(app: AppHandle, file_name: String, text: String) -> Resul
     if let Some(extension) = Path::new(&file_name).extension().and_then(|extension| extension.to_str()) {
         dialog = dialog.add_filter(extension, &[extension]);
     }
+    #[cfg(desktop)]
     if let Some(window) = app.get_webview_window("main") {
         dialog = dialog.set_parent(&window);
     }

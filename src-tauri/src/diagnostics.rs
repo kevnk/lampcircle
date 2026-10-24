@@ -131,15 +131,17 @@ pub async fn export_diagnostics(app: AppHandle) -> Result<Option<DiagnosticsExpo
         file_name_slug(&app.package_info().name)
     );
 
-    let mut dialog = app
+    let dialog = app
         .dialog()
         .file()
         .set_title("Export diagnostics")
         .set_file_name(default_name)
         .add_filter("ZIP archive", &["zip"]);
-    if let Some(settings_window) = app.get_webview_window("settings") {
-        dialog = dialog.set_parent(&settings_window);
-    }
+    #[cfg(desktop)]
+    let dialog = match app.get_webview_window("settings") {
+        Some(settings_window) => dialog.set_parent(&settings_window),
+        None => dialog,
+    };
 
     let Some(destination) = dialog.blocking_save_file() else {
         return Ok(None);
