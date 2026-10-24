@@ -404,7 +404,7 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
       </header>
       )}
 
-      {/* iPhone: one column above the fixed bar. Landscape and iPad keep the columns, clear of the notch. */}
+      {/* iPhone: one column above the fixed bar. Landscape and iPad keep side-by-side columns, clear of the notch. */}
       <div className="grid flex-1 grid-cols-[200px_minmax(0,1fr)_290px] max-lg:grid-cols-[minmax(0,1fr)_260px] ios:pb-[calc(6rem_+_env(safe-area-inset-bottom))] ios:pl-[env(safe-area-inset-left)] ios:pr-[env(safe-area-inset-right)] ios:max-md:grid-cols-1">
         <SetList set={set} items={items} current={current} viewing={viewing} onView={show} />
         <main className="border-x border-line px-6 py-6 max-lg:border-l-0 ios:max-md:border-x-0 ios:max-md:px-4">
@@ -437,7 +437,7 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
           ) : null}
           {ios && !finished && <div className="mt-4">{fadeSwitch}</div>}
         </main>
-        <aside className="px-5 py-6 max-lg:col-span-2 max-lg:border-t max-lg:border-line ios:max-md:col-span-1 ios:max-md:px-4">
+        <aside className="px-5 py-6 max-lg:col-span-2 max-lg:border-t max-lg:border-line ios:max-lg:col-span-1 ios:max-md:px-4 ios:md:border-t-0">
           {finished ? null : isSong && song ? (
             <OnDeck
               song={song}

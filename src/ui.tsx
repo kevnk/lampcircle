@@ -49,14 +49,19 @@ export function HoldButton(props: { onConfirm: () => void; ms?: number; disabled
       disabled={disabled}
       className={`relative touch-none overflow-hidden ${className}`}
       onPointerDown={event => {
-        if (event.button !== 0) return;
-        event.currentTarget.setPointerCapture(event.pointerId);
+        if (event.button !== 0 || press.current) return;
         const timer = window.setTimeout(() => {
           letGo();
           onConfirm();
         }, ms);
         press.current = { timer, x: event.clientX, y: event.clientY };
         setHolding(true);
+        // So a mouse let go off the button still lets go. Touches are captured anyway.
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+          // A pointer the browser is not tracking cannot be captured. Its pointerup on the button still lets go.
+        }
       }}
       onPointerMove={event => {
         const start = press.current;

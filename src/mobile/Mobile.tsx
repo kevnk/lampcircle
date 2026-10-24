@@ -181,8 +181,8 @@ export function ReadOnlyMap({ song, step }: { song: Song; step: 'refine' | 'expo
                 </span>
               </p>
               <p className="mt-1 text-sm text-muted">
-                Plays ×{view.section.repeats}. A jump waits for {JUMP_TEXT[view.section.jumpAt]}. Fades in over {beatsLabel(view.section.fadeInBeats)}, out over {beatsLabel(view.section.fadeOutBeats)}
-                {view.section.pickupBeats ? `, from ${beatsLabel(view.section.pickupBeats)} early` : ''}.
+                Plays ×{view.section.repeats}. A jump waits for {JUMP_TEXT[view.section.jumpAt]}. Fades in over {beatsLabel(view.section.fadeInBeats)}, out over {beatsLabel(view.section.fadeOutBeats)}.
+                {view.section.pickupBeats ? ` The fade-in ends ${beatsLabel(view.section.pickupBeats)} early.` : ''}
               </p>
             </li>
           ))}

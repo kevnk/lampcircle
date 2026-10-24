@@ -362,7 +362,7 @@ export function SongTap({ song }: { song: Song }) {
             {mapped ? 'Mapped from the song ✓' : 'Map the rest from the song'}
           </Button>
           <p className="mt-4 text-sm text-muted">
-            Tap {MIN_TAPS} beats or more where the beat is clear, with Shift on a beat 1. Then map the rest: the app follows the
+            Tap {MIN_TAPS} beats or more where the beat is clear, with {ios ? 'Tap beat 1' : 'Shift'} on a beat 1. Then map the rest: the app follows the
             recording from your taps, drift and all. Gray ticks are beats the app placed.
           </p>
         </Card>
@@ -370,7 +370,7 @@ export function SongTap({ song }: { song: Song }) {
         <Card className="p-5">
           <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-xl font-bold"><span className="text-amber">2</span> · Mark sections</h2>
-            <p className="text-sm text-muted">Press a label (or 1–8) while it plays. It starts at the nearest bar.</p>
+            <p className="text-sm text-muted">Press a label{ios ? '' : ' (or 1–8)'} while it plays. It starts at the nearest bar.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             {SECTION_TYPES.map((item, i) => (
