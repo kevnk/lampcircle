@@ -1,8 +1,9 @@
 # Builds the Mac app and publishes it as a GitHub Release whenever a version tag is pushed.
 # `npm run release -- 0.2.0` sets the version in package.json, tauri.conf.json and Cargo.toml; commit
 # that, then tag v0.2.0 and push the tag. This builds a universal (Apple silicon + Intel) .dmg and the
-# signed updater bundle, and attaches them with latest.json. Installed copies of Lamp Circle find the
-# new version through the relay in feedback-relay/ the next time someone checks for updates.
+# signed updater bundle, and attaches them with latest.json plus a stable-name copy of the .dmg.
+# Installed copies of Lamp Circle find the new version through the relay in feedback-relay/ the next
+# time someone checks for updates.
 #
 # Running it by hand (Actions › Release › Run workflow) is a dry run: the same build, attached to a
 # draft release that installed copies never see. Delete that draft before you push the version's tag.
@@ -183,3 +184,23 @@ jobs:
             echo "::error::The signed Tauri updater archive or its .sig is missing or empty."
             exit 1
           fi
+
+      # The website's Download button links to releases/latest/download/Lampcircle_universal.dmg, so
+      # each release also carries the .dmg under that fixed name. The versioned .dmg, .app.tar.gz, .sig
+      # and latest.json stay as tauri-action uploaded them; the updater doesn't use the .dmg.
+      - name: Publish the dmg under a stable name
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dmg=$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -maxdepth 1 -type f -name '*.dmg')
+          if [ -z "$dmg" ]; then
+            echo "::error::No .dmg was produced."
+            exit 1
+          elif [ "$(printf '%s\n' "$dmg" | wc -l)" -gt 1 ]; then
+            echo "::error::Found more than one .dmg:"
+            printf '%s\n' "$dmg"
+            exit 1
+          fi
+          cp "$dmg" "$RUNNER_TEMP/Lampcircle_universal.dmg"
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          gh release upload "v$version" "$RUNNER_TEMP/Lampcircle_universal.dmg" --clobber --repo "$GITHUB_REPOSITORY"
