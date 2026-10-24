@@ -3,7 +3,7 @@ import { AudioLines, ListMusic, Play, Search, Square, Trash2 } from 'lucide-reac
 import type { Song } from '../types';
 import { go, useStore } from '../store';
 import { Button, Card, Label, LinkButton, Menu, MenuItem, MiniStrip, RestingBars } from '../ui';
-import { PAD_ALBUM, helper, importPad, importSong, jobKind, mapForRecording, namesMap, queueLink, splitTitle, type Job } from '../lib/library';
+import { PAD_ALBUM, helper, importPad, importSong, jobKind, mapForRecording, nameMatch, queueLink, splitTitle, type Job } from '../lib/library';
 import { parseDjw, type DjwMap } from '../lib/djw';
 import { KEY_NAMES } from '../lib/music';
 import { STEP_LABEL, bpmOf, clock, keysText, nextStep, sectionViews, songGrid, songKeys, type Step } from '../lib/songMap';
@@ -69,7 +69,7 @@ export function Library() {
           const result = await openDjw(file);
           if (result && 'addedAt' in result) added.push(result);
           else if (result && ios) maps = [...maps, result];
-        } else if (maps.length) {
+        } else if (maps.length && !(ios && tab === 'pads')) {
           const map = mapForRecording(maps, choosing.current, ios ? file.name : undefined)!;
           choosing.current = null;
           // Taken off the queue before the import, so audio added meanwhile goes to the next map. It goes back if this fails.
@@ -104,7 +104,7 @@ export function Library() {
     // a map, so a recording with a plain file name cannot take another song's map, then the rest in order.
     for (const file of all.filter(isMap)) await add(file);
     const recordings = all.filter(file => !isMap(file));
-    const named = recordings.filter(file => maps.some(map => namesMap(map, file.name)));
+    const named = recordings.filter(file => maps.some(map => nameMatch(map, file.name) > 0));
     for (const file of [...named, ...recordings.filter(file => !named.includes(file))]) await add(file);
     return added;
   };
@@ -293,7 +293,14 @@ export function Library() {
       ))}
 
       {ios ? (
-        <ImportFromFiles tab={tab} onFiles={addFiles} />
+        <ImportFromFiles
+          tab={tab}
+          onFiles={files => {
+            // A Choose audio picker that was closed without a file leaves its map chosen. This pick names its own maps.
+            choosing.current = null;
+            return addFiles(files);
+          }}
+        />
       ) : (
         <AddFromYouTube tab={tab} onFile={() => audioInput.current?.click()} onDropFiles={files => void addFiles(files)} />
       )}

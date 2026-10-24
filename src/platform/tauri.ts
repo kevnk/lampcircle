@@ -48,13 +48,16 @@ export const desktop: Desktop = {
   onFilesOpened: handler => onEvent<null>('files-opened', handler),
 };
 
+/** The Files picker also offers these, which the Mac library never holds. */
+const PICKED_TYPES: Record<string, string> = { ...AUDIO_TYPES, aif: 'audio/aiff', aiff: 'audio/aiff', caf: 'audio/x-caf' };
+
 /** Reads the files src-tauri/src/ios.rs frames into one body: the header's length as a little-endian u32, a JSON header, then each file's bytes. */
 export function unpack(body: ArrayBuffer): { files: File[]; route?: string } {
   const length = new DataView(body).getUint32(0, true);
   const header: { route?: string; files: Array<{ name: string; size: number }> } = JSON.parse(new TextDecoder().decode(new Uint8Array(body, 4, length)));
   let at = 4 + length;
   const files = header.files.map(({ name, size }) => {
-    const file = new File([new Uint8Array(body, at, size)], name, { type: AUDIO_TYPES[name.split('.').pop()?.toLowerCase() ?? ''] ?? '' });
+    const file = new File([new Uint8Array(body, at, size)], name, { type: PICKED_TYPES[name.split('.').pop()?.toLowerCase() ?? ''] ?? '' });
     at += size;
     return file;
   });

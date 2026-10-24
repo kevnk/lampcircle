@@ -37,21 +37,31 @@ export function jobKind(job: Job): 'song' | 'pad' {
   return job.kind ?? (/\bpads?\b/i.test(job.title ?? '') ? 'pad' : 'song');
 }
 
-const squash = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, '');
+/** Letters and digits only, with accents dropped, so "Cuán" and "cuan" compare equal. */
+const squash = (text: string) =>
+  text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
 
-/** A recording's file name is the map's saved audio file, or has the song's title in it. */
-export function namesMap(map: DjwMap, fileName: string): boolean {
+/** How strongly a recording's file name points at a map: its saved audio file beats any title, and a longer title beats a shorter one. 0 is not at all. */
+export function nameMatch(map: DjwMap, fileName: string): number {
   const name = squash(fileName);
+  if (map.audioFile && squash(map.audioFile.split(/[\\/]/).pop()!) === name) return Infinity;
   const title = squash(map.title);
-  return (map.audioFile !== undefined && squash(map.audioFile.split(/[\\/]/).pop()!) === name) || (title !== '' && name.includes(title));
+  return title && name.includes(title) ? title.length : 0;
 }
 
 /**
  * The waiting .djw map a recording goes to: the one you chose audio for, else, given the recording's
- * file name, the map it names, else the one waiting longest.
+ * file name, the map it names most strongly, else the one waiting longest.
  */
 export function mapForRecording(waiting: DjwMap[], chosen: DjwMap | null, fileName?: string): DjwMap | undefined {
-  return waiting.find(map => map === chosen) ?? (fileName ? waiting.find(map => namesMap(map, fileName)) : undefined) ?? waiting[0];
+  const named = fileName
+    ? waiting.reduce<DjwMap | undefined>((best, map) => (nameMatch(map, fileName) > (best ? nameMatch(best, fileName) : 0) ? map : best), undefined)
+    : undefined;
+  return waiting.find(map => map === chosen) ?? named ?? waiting[0];
 }
 
 /** Turn a finished download into a song or pad. */

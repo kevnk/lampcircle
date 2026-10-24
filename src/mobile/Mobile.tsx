@@ -146,6 +146,8 @@ const JUMP_TEXT: Record<JumpAt, string> = { beat: 'the next beat', bar: 'the nex
 export function ReadOnlyMap({ song, step }: { song: Song; step: 'refine' | 'export' }) {
   const store = useStore();
   const [status, setStatus] = useState<string | null>(null);
+  /** iOS shows one file dialog at a time, so a second tap waits for the first. */
+  const [sharing, setSharing] = useState(false);
   const views = sectionViews(song);
   const list = checks(song);
   const passing = list.filter(check => check.ok).length;
@@ -154,6 +156,7 @@ export function ReadOnlyMap({ song, step }: { song: Song; step: 'refine' | 'expo
 
   const share = async () => {
     setStatus(null);
+    setSharing(true);
     try {
       if (!(await platform.saveText(serializeDjw(song, { includeAudioPath: false }), fileNameFor(song.title)))) return;
       const stamp = Date.now();
@@ -161,6 +164,8 @@ export function ReadOnlyMap({ song, step }: { song: Song; step: 'refine' | 'expo
       setStatus('Shared.');
     } catch (problem) {
       setStatus(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -205,7 +210,7 @@ export function ReadOnlyMap({ song, step }: { song: Song; step: 'refine' | 'expo
           </ul>
         )}
         <div className="mt-4 grid gap-3">
-          <Button tone="primary" onClick={() => void share()}>
+          <Button tone="primary" disabled={sharing} onClick={() => void share()}>
             <Share className="h-4 w-4" aria-hidden />
             Share .djw
           </Button>

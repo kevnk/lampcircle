@@ -185,7 +185,8 @@ option {
   -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
 }
-.ios :is(button, select, label, input, [role='button']) {
+/* No specificity, so a control's own touch-action, like Stop's touch-none, still wins. */
+:where(.ios) :where(button, select, label, input, [role='button']) {
   touch-action: manipulation;
 }
 

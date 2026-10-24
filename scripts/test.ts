@@ -109,7 +109,10 @@ same('a file name with the title goes to that map', lib.mapForRecording([wayMake
 same('a file name matching the saved audio path goes to that map', lib.mapForRecording([wayMaker, exported], null, 'hf-live.m4a'), exported);
 same('a file name matching no map goes to the oldest', lib.mapForRecording([wayMaker, goodFather], null, 'voice memo.m4a'), wayMaker);
 same('the map you chose audio for still wins', lib.mapForRecording([wayMaker, goodFather], wayMaker, 'good-good-father.mp3'), wayMaker);
-same('a recording names its map by title or saved file', [lib.namesMap(goodFather, 'Good Good Father.m4a'), lib.namesMap(exported, 'HF-Live.M4A'), lib.namesMap(wayMaker, 'Track 01.mp3')], [true, true, false]);
+same('a recording names its map by title or saved file', [lib.nameMatch(goodFather, 'Good Good Father.m4a') > 0, lib.nameMatch(exported, 'HF-Live.M4A') > 0, lib.nameMatch(wayMaker, 'Track 01.mp3')], [true, true, 0]);
+const [holy, holyForever, cuan] = [{ title: 'Holy' }, { title: 'Holy Forever' }, { title: 'Cuán Grande Es Él' }] as never[];
+same('the longest title a file name holds wins', [lib.mapForRecording([holy, holyForever], null, 'Holy Forever (Live).mp3'), lib.mapForRecording([holyForever, holy], null, 'holy.mp3')], [holyForever, holy]);
+same('accents do not stop a match', lib.mapForRecording([wayMaker, cuan], null, 'Cuan Grande Es El.m4a'), cuan);
 
 // iOS hands Files picks and the dev seed over as one body: a u32 header length, a JSON header, then the bytes (src-tauri/src/ios.rs).
 const { unpack } = await import('../src/platform/tauri.ts');
