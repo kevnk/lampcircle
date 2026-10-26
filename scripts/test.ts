@@ -252,6 +252,95 @@ same('djw round trip ones', back.taps.filter(x => x.one).length, map.songGrid(s)
 const v1 = djw.parseDjw(readFileSync(new URL('../way-maker.sample.djw', import.meta.url), 'utf8'));
 same('djw v1 title', v1.title, 'Way Maker');
 same('djw v1 parts become sections', v1.sections.slice(0, 2).map(x => [x.type, x.at, x.pickupBeats]), [['intro', 3.2, 0], ['verse', 17.33, 1]]);
+same('a map without lyrics writes no lyrics keys', /\blyrics:|slide_bars/.test(text), false);
+// A map opened from a .djw, the way importSong builds it, minus the audio.
+const opened = (m: import('../src/lib/djw.ts').DjwMap, duration = 30) =>
+  ({
+    ...{ id: 'w', title: m.title, artist: m.artist, duration, source: m.source, peaks: [], chroma: [], beatsPerBar: m.beatsPerBar, taps: m.taps, fill: false },
+    ...{ sections: m.sections.map((x, i) => ({ id: `w${i}`, ...x })), lyrics: m.lyrics, marksEnd: m.marksEnd ?? duration, refined: true, updatedAt: 0, addedAt: 0 },
+  }) as import('../src/types.ts').Song;
+const meaning = (x: import('../src/types.ts').Song) => [
+  [x.title, x.artist, x.source, map.songGrid(x).beats.map(r3)],
+  map.sectionViews(x).map(v => [v.name, v.s, v.e, v.section.pickupBeats, v.section.fadeInBeats, v.section.fadeOutBeats, v.section.repeats, v.section.jumpAt]),
+];
+const sampleSong = opened(v1);
+const sampleText = djw.serializeDjw(sampleSong, { includeAudioPath: false });
+same('the v1 sample exported and read back means the same', meaning(opened(djw.parseDjw(sampleText))), meaning(sampleSong));
+same('and exports the same again', djw.serializeDjw(opened(djw.parseDjw(sampleText)), { includeAudioPath: false }), sampleText);
+same('the v1 sample writes no lyrics keys', /\blyrics:|slide_bars/.test(sampleText), false);
+
+// Lyrics round trip: slides of several lines, a deliberate blank, a chorus shared by two sections. Placeholder words.
+const words = {
+  source: 'lrclib:5170474',
+  offset: -0.25,
+  leadBeats: 1.5,
+  fadeBeats: 1,
+  blocks: {
+    'verse-1': [['First line', 'second line'], ['Third line: with # marks', '- and a dash']],
+    chorus: [['Chorus one', 'chorus two'], [], ['Chorus three']],
+    bridge: [['Bridge line']],
+  },
+};
+const lyricFor: Record<string, import('../src/types.ts').SectionLyric> = {
+  'Verse 1': { block: 'verse-1', slideBars: [0, 2] },
+  Chorus: { block: 'chorus', slideBars: [0, 1, 3] },
+  Bridge: { block: 'bridge', slideBars: [0] },
+  Outro: { block: 'chorus', slideBars: [0, 2, 3] },
+};
+const sung = { ...s, lyrics: words, sections: map.sectionViews(s).map(v => (lyricFor[v.name] ? { ...v.section, lyric: lyricFor[v.name] } : v.section)) };
+const sungText = djw.serializeDjw(sung, { includeAudioPath: false });
+const sungWarnings: string[] = [];
+const sungBack = djw.parseDjw(sungText, sungWarnings);
+same('lyrics survive export and import', sungBack.lyrics, words);
+same('so does the block and slide bars of each section', sungBack.sections.map(x => x.lyric ?? null), map.sectionViews(sung).map(v => v.section.lyric ?? null));
+same('and reading them back warns of nothing', sungWarnings, []);
+same('blocks are written as literal text, a blank line between slides', sungText.includes('    chorus: |\n      Chorus one\n      chorus two\n\n      -\n\n      Chorus three\n'), true);
+same('slide bars are written on one line', sungText.includes('    lyrics: chorus\n    slide_bars: [ 0, 1, 3 ]\n'), true);
+const again = djw.parseDjw(djw.serializeDjw(opened(sungBack, s.duration), { includeAudioPath: false }));
+same('a second export and import keeps them too', [again.lyrics, again.sections.map(x => x.lyric ?? null)], [words, sungBack.sections.map(x => x.lyric ?? null)]);
+
+// Bad lyrics never stop a map from opening. What can't be used is left out or clamped, with a warning.
+// The Verse's end_bar says 3, but the Chorus starts on bar 5, and that is where the app ends the Verse.
+const badMap = (lyrics: string, verse = '', chorus = '') => `djw: 2
+song: { title: Bad Lyrics, meter: 4/4 }
+grid:
+  beats: [${Array.from({ length: 32 }, (_, i) => i / 2).join(', ')}]
+  downbeats: [0, 2, 4, 6, 8, 10, 12, 14]
+${lyrics}
+sections:
+  - { name: Verse, type: verse, start_bar: 1, end_bar: 3, pickup_beats: 0, fade_in: 1, fade_out: 1, repeats: 1, jump_at: bar${verse} }
+  - { name: Chorus, type: chorus, start_bar: 5, end_bar: 9, pickup_beats: 0, fade_in: 1, fade_out: 1, repeats: 1, jump_at: bar${chorus} }
+`;
+const openBad = (text: string) => {
+  const warnings: string[] = [];
+  const m = djw.parseDjw(text, warnings);
+  return { sections: m.sections.map(x => [x.type, x.at, x.lyric ?? null]), lyrics: m.lyrics ?? null, warnings };
+};
+same('lyrics that are a number are left out', openBad(badMap('lyrics: 5', '', ', lyrics: chorus, slide_bars: [0]')), {
+  sections: [['verse', 0, null], ['chorus', 8, null]],
+  lyrics: null,
+  warnings: ['The lyrics in this file could not be read, so they were left out.', 'Chorus shows lyrics "chorus", which this file does not have, so it stays blank.'],
+});
+same('blocks as a list are left out and lead_beats is clamped', openBad(badMap('lyrics:\n  lead_beats: 100\n  blocks: [a, b]')), {
+  sections: [['verse', 0, null], ['chorus', 8, null]],
+  lyrics: { leadBeats: 8, blocks: {} },
+  warnings: ['lyrics.blocks is not a set of named blocks, so it was left out.', 'lyrics.lead_beats 100 became 8.'],
+});
+const badBlocks = 'lyrics:\n  source: 7\n  fade_beats: 1.2\n  blocks:\n    verse: |\n      One\n      two\n\n      Three\n\n\n      Four\n    empty: ""\n    number: 12';
+same('bad blocks and slide bars are dropped or clamped, a missing block shows blank', openBad(badMap(badBlocks, ', lyrics: verse, slide_bars: ["x", -3, 99, 2, 2]', ', lyrics: verse, slide_bars: [0, 1, 2, 3]')), {
+  sections: [['verse', 0, { block: 'verse', slideBars: [0, 2, 3] }], ['chorus', 8, { block: 'verse', slideBars: [0, 1, 2] }]],
+  lyrics: { fadeBeats: 1, blocks: { verse: [['One', 'two'], ['Three'], ['Four']] } },
+  warnings: [
+    'Lyrics block "empty" has no words to show, so it was left out.',
+    'Lyrics block "number" has no words to show, so it was left out.',
+    'lyrics.source could not be read, so it was left out.',
+    'lyrics.fade_beats 1.2 became 1.',
+    'Verse slide_bars ["x",-3,99,2,2] became [0,2,3].',
+    'Chorus slide_bars [0,1,2,3] became [0,1,2].',
+  ],
+});
+same('a section pointing to a missing block shows blank', openBad(badMap(badBlocks, ', lyrics: nope')).sections[0], ['verse', 0, null]);
+same('slide bars that loop back on themselves still open', openBad(badMap(badBlocks, ', lyrics: verse, slide_bars: &x [*x]', ', lyrics: &y [*y]')).sections, [['verse', 0, { block: 'verse', slideBars: [0] }], ['chorus', 8, null]]);
 
 // Library file round trip.
 const backup = await import('../src/lib/backup.ts');

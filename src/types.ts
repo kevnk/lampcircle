@@ -36,6 +36,28 @@ export interface Section {
   fadeOutEndBeats?: number;
   repeats: number;
   jumpAt: JumpAt;
+  /** Missing means the screen stays blank through this section. */
+  lyric?: SectionLyric;
+}
+
+/** The block a section shows, and the bar each slide comes in on, counted from the section's first bar (0). */
+export interface SectionLyric {
+  block: string;
+  slideBars: number[];
+}
+
+/** Words for the screen. Each block holds its words once, and sections point to one, so repeated choruses share it. */
+export interface Lyrics {
+  /** Where the words came from: youtube-subs, youtube-auto, lrclib:<id>, whisper or manual. Playback never reads it. */
+  source?: string;
+  /** Seconds the words were nudged when they were placed. Playback never reads it. */
+  offset?: number;
+  /** Slides change this many beats before their bar, 0 to 8 in half beats. Missing means the app default, 2. */
+  leadBeats?: number;
+  /** Beats a slide takes to fade out and in. Missing means the app default, 1. */
+  fadeBeats?: number;
+  /** Block id to its slides, each slide the lines on screen. An empty slide is a deliberate blank. */
+  blocks: Record<string, string[][]>;
 }
 
 /** Audio lives in its own store, keyed by the song id. */
@@ -54,6 +76,7 @@ export interface Song {
   /** Extend the grid from the edge tempos to the start and end of the song. */
   fill: boolean;
   sections: Section[];
+  lyrics?: Lyrics;
   /** Seconds. The last section ends here. */
   marksEnd: number;
   refined: boolean;
