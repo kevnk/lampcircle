@@ -60,6 +60,15 @@ export interface Lyrics {
   blocks: Record<string, string[][]>;
 }
 
+/** A line of words and when it is sung, in seconds of the recording, before it is placed on bars. */
+export interface TimedLine {
+  start: number;
+  end: number;
+  text: string;
+  /** Where its timing came from: YouTube manual or auto captions, or LRCLIB's LRC. */
+  kind: 'manual' | 'auto' | 'lrc';
+}
+
 /** Audio lives in its own store, keyed by the song id. */
 export interface Song {
   id: string;
@@ -77,6 +86,8 @@ export interface Song {
   fill: boolean;
   sections: Section[];
   lyrics?: Lyrics;
+  /** The timed lines Find lyrics found, kept in the app for placement. Never written to a .djw. */
+  timedLyrics?: TimedLine[];
   /** Seconds. The last section ends here. */
   marksEnd: number;
   refined: boolean;

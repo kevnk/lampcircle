@@ -420,6 +420,149 @@ const tooLate = perform([[6, session => session.toggleHold()], [0.3, session => 
 same('once the Verse is fading out under the loop, it plays once more and then moves on', tooLate, ['1.1', '1.2', '2.1']);
 same('Hold stays lit until that loop lands, a second press keeps it letting go, then it shows off', shown, [true, true, false]);
 
+// Finding lyrics: caption and LRC parsers, clean-up, LRCLIB, and the order sources are tried in. Words are made up.
+const lyr = await import('../src/lib/lyricsFetch.ts');
+const timed = (lines: Array<{ start: number; end: number; text: string; kind: string }>) => lines.map(line => [r3(line.start), r3(line.end), line.text, line.kind]);
+const json3 = (events: unknown[]) => JSON.stringify({ wireMagic: 'pb3', events });
+const autoJson3 = json3([
+  { tStartMs: 0, dDurationMs: 484210, id: 1 },
+  { tStartMs: 440, dDurationMs: 6930, segs: [{ utf8: '[Music]' }] },
+  { tStartMs: 4090, dDurationMs: 3280, aAppend: 1, segs: [{ utf8: '\n' }] },
+  { tStartMs: 19800, dDurationMs: 12759, segs: [{ utf8: 'shine' }, { utf8: ' a', tOffsetMs: 840 }, { utf8: ' light', tOffsetMs: 920 }] },
+  { tStartMs: 24000, dDurationMs: 9000, segs: [{ utf8: '♪ ' }, { utf8: 'on', tOffsetMs: 500 }, { utf8: ' the hill', tOffsetMs: 900 }] },
+  { tStartMs: 30000, dDurationMs: 2000, segs: [{ utf8: '  ' }] },
+  { tStartMs: 31000, dDurationMs: 6000, segs: [{ utf8: 'on the hill' }] },
+]);
+same('json3: [Music], newline and blank events are skipped, a line runs until the next starts', timed(lyr.parseJson3(autoJson3, 'auto')), [
+  [19.8, 24, 'shine a light', 'auto'],
+  [24.5, 30, 'on the hill', 'auto'],
+  [31, 37, 'on the hill', 'auto'],
+]);
+const autoVtt = [
+  'WEBVTT', 'Kind: captions', 'Language: en', '', 'NOTE made up words', '', 'STYLE', '::cue { color: white }', '',
+  '00:00:01.000 --> 00:00:04.000 align:start position:0%', ' ', 'shine<00:00:01.500><c> a</c><00:00:02.000><c> light</c>', '',
+  '00:00:04.000 --> 00:00:04.010 align:start position:0%', 'shine a light', ' ', '',
+  '00:00:04.010 --> 00:00:07.000 align:start position:0%', 'shine a light', 'on<00:00:05.000><c> the</c><00:00:05.500><c> hill</c>', '',
+  '00:00:07.000 --> 00:00:07.010 align:start position:0%', 'on the hill', ' ', '',
+  '00:00:07.010 --> 00:00:09.000 align:start position:0%', 'on the hill', 'on<00:00:07.500><c> the</c><00:00:08.000><c> hill</c>', '',
+  '01:02.000 --> 01:04.500', '[Music] bread &amp; wine', '',
+  '01:10.000 --> 01:12.000', 'bread &amp; wine', '',
+].join('\n');
+same('vtt: word tags out, rolling repeats once, a line sung twice kept twice, also after a gap, mm:ss cues', timed(lyr.parseVtt(autoVtt, 'auto')), [
+  [1, 4, 'shine a light', 'auto'],
+  [4.01, 7, 'on the hill', 'auto'],
+  [7.01, 9, 'on the hill', 'auto'],
+  [62, 64.5, 'bread & wine', 'auto'],
+  [70, 72, 'bread & wine', 'auto'],
+]);
+const manualVtt = 'WEBVTT\n\n1\n00:00:20.000 --> 00:00:30.000\nLine one here\nline two here\n\n2\n00:00:30,000 --> 00:00:39,500 line:90%\n<i>Third</i> line\n';
+same('vtt: a manual cue is one line, SRT commas read too', timed(lyr.parseVtt(manualVtt, 'manual')), [
+  [20, 30, 'Line one here line two here', 'manual'],
+  [30, 39.5, 'Third line', 'manual'],
+]);
+const lrc = '[ar:Made Up Band]\n[ti:Made Up Song]\n[offset:+500]\n[00:12.00]Shine a light\n[00:15.50][01:10.00]On the hill\n[00:20.00]\n[00:21.00]<00:21.00>Word <00:21.50>by word\n';
+same('lrc: tags skipped, offset applied, one line at two times, gaps end lines, last runs to the song end', timed(lyr.parseLrc(lrc, 72)), [
+  [11.5, 15, 'Shine a light', 'lrc'],
+  [15, 19.5, 'On the hill', 'lrc'],
+  [20.5, 28.5, 'Word by word', 'lrc'],
+  [69.5, 72, 'On the hill', 'lrc'],
+]);
+same('lrc: without the song length the last line lasts 5 s', timed(lyr.parseLrc(lrc)).at(-1), [69.5, 74.5, 'On the hill', 'lrc']);
+same('lrc: a line ends by the song end', timed(lyr.parseLrc('[00:09.00]a\n[00:12.00]b', 10)), [[9, 10, 'a', 'lrc'], [12, 17, 'b', 'lrc']]);
+const rolling = [
+  { start: 0, end: 3, text: '[Music]', kind: 'auto' },
+  { start: 3, end: 6, text: '♪ shine a light ♪', kind: 'auto' },
+  { start: 5, end: 8, text: 'shine a light', kind: 'auto' },
+  { start: 7, end: 10, text: 'shine a light on', kind: 'auto' },
+  { start: 9.5, end: 12, text: 'shine a  light on the hill', kind: 'auto' },
+  { start: 12.5, end: 14, text: 'shine a light', kind: 'auto' },
+] as const;
+same('clean-up: [Music] and ♪ out, an overlapping repeat or a line growing word by word is one line', timed(lyr.cleanLines(rolling.map(line => ({ ...line })))), [
+  [3, 12, 'shine a light on the hill', 'auto'],
+  [12.5, 14, 'shine a light', 'auto'],
+]);
+
+/** A stand-in for fetch: answers by LRCLIB path, and remembers what was asked. */
+function fakeLrclib(answer: (path: string, url: URL) => Response | Promise<Response>) {
+  const calls: Array<{ path: string; params: Record<string, string>; client: string | null }> = [];
+  const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const path = url.pathname.replace('/api', '');
+    calls.push({ path, params: Object.fromEntries(url.searchParams), client: new Headers(init?.headers).get('Lrclib-Client') });
+    return answer(path, url);
+  }) as typeof fetch;
+  return { fetchFn, calls };
+}
+const jsonResponse = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers });
+const record = (id: number, duration: number, more = {}) => ({
+  ...{ id, trackName: 'Made Up Song', artistName: 'Made Up Band', duration, instrumental: false, plainLyrics: 'Shine a light' },
+  ...{ syncedLyrics: '[00:01.00]Shine a light\n[00:04.00]On the hill' },
+  ...more,
+});
+const lookup = { title: 'Made Up Song', artist: 'Made Up Band', duration: 198.1 };
+const summary = (found: Awaited<ReturnType<typeof lyr.findLyrics>>) => (found ? [found.source, found.kind, found.lines.length, found.note ?? null] : null);
+
+let lrclib = fakeLrclib(() => jsonResponse(record(7, 198)));
+same('LRCLIB: a duration match from get', summary(await lyr.lrclibLyrics(lookup, lrclib.fetchFn)), ['lrclib:7', 'lrc', 2, null]);
+same('and it asks with the rounded length, naming the app', [lrclib.calls[0].path, lrclib.calls[0].params.duration, /^LampCircle\/\S+ \(https:\/\/github\.com\/kevnk\/lampcircle\)$/.test(lrclib.calls[0].client ?? '')], ['/get', '198', true]);
+lrclib = fakeLrclib(path =>
+  path === '/get'
+    ? jsonResponse({ code: 404, name: 'TrackNotFound' }, 404)
+    : jsonResponse([record(1, 198, { syncedLyrics: null }), record(2, 198, { instrumental: true, syncedLyrics: '' }), record(3, 240), record(4, 199.5)]),
+);
+same('LRCLIB: a get miss searches, and takes the synced record closest in length', summary(await lyr.lrclibLyrics(lookup, lrclib.fetchFn)), ['lrclib:4', 'lrc', 2, null]);
+lrclib = fakeLrclib((path, url) => (path === '/search' && !url.searchParams.has('artist_name') ? jsonResponse([record(5, 260)]) : jsonResponse(path === '/get' ? { code: 404 } : [], path === '/get' ? 404 : 200)));
+const far = await lyr.lrclibLyrics(lookup, lrclib.fetchFn);
+same('LRCLIB: then by title alone, and a record far in length says so', [summary(far)?.slice(0, 3), /61\.9 s off/.test(far?.note ?? ''), lrclib.calls.map(call => call.path)], [['lrclib:5', 'lrc', 2], true, ['/get', '/search', '/search']]);
+lrclib = fakeLrclib(() => jsonResponse(record(9, 98)));
+same('LRCLIB: a get answer over 2 s off says so too', summary(await lyr.lrclibLyrics({ ...lookup, duration: 100.49 }, lrclib.fetchFn))?.[3], "LRCLIB's closest synced lyrics are 2.5 s off this recording's length, so the times may not fit.");
+lrclib = fakeLrclib(() => jsonResponse({ message: 'slow down' }, 429, { 'Retry-After': '120' }));
+same('LRCLIB: a long 429 is a miss, with no retries', [await lyr.lrclibLyrics(lookup, lrclib.fetchFn), lrclib.calls.length], [null, 3]);
+let tries = 0;
+lrclib = fakeLrclib(() => (tries++ ? jsonResponse(record(8, 198)) : jsonResponse({}, 429, { 'Retry-After': '0' })));
+same('LRCLIB: a short 429 is tried once more', [summary(await lyr.lrclibLyrics(lookup, lrclib.fetchFn)), lrclib.calls.length], [['lrclib:8', 'lrc', 2, null], 2]);
+lrclib = fakeLrclib(path => (path === '/get' ? Promise.reject(new TypeError('offline')) : new Response('<html>', { status: 200 })));
+same('LRCLIB: no network or a page that is not JSON is a miss', await lyr.lrclibLyrics(lookup, lrclib.fetchFn), null);
+same('a title is looked up without the video extras', [
+  lyr.songQuery({ title: 'Housefires - Good Good Father ⧸⧸ feat. Pat Barrett (Official Music Video)', artist: '' }),
+  lyr.songQuery({ title: 'Good Good Father ⧸⧸ feat. Pat Barrett', artist: 'Housefires' }),
+  lyr.songQuery({ title: 'Way Maker Official Live Video', artist: 'Leeland VEVO' }),
+  lyr.songQuery({ title: 'Made Up Song | Made Up Band', artist: '' }),
+], [
+  { title: 'Good Good Father', artist: 'Housefires' },
+  { title: 'Good Good Father', artist: 'Housefires' },
+  { title: 'Way Maker', artist: 'Leeland' },
+  { title: 'Made Up Song', artist: 'Made Up Band' },
+]);
+
+const tube = { ...(s as object), ...lookup, source: 'https://www.youtube.com/watch?v=abcdefghijk' } as never;
+const manualTrack = { kind: 'manual', lang: 'en', ext: 'json3', text: json3([{ tStartMs: 20000, dDurationMs: 10000, segs: [{ utf8: 'Shine a light on the hill' }] }]) } as const;
+const autoTrack = { kind: 'auto', lang: 'en-orig', ext: 'vtt', text: autoVtt } as const;
+const lrclibHit = () => fakeLrclib(() => jsonResponse(record(7, 198))).fetchFn;
+const lrclibMiss = () => fakeLrclib(path => jsonResponse(path === '/get' ? { code: 404 } : [], path === '/get' ? 404 : 200)).fetchFn;
+const lrclibFar = () => fakeLrclib(path => jsonResponse(path === '/get' ? { code: 404 } : [record(5, 260)], path === '/get' ? 404 : 200)).fetchFn;
+const tracks = (...list: unknown[]) => async () => list as never;
+same('order: manual captions win over LRCLIB', summary(await lyr.findLyrics(tube, { captions: tracks(autoTrack, manualTrack), fetch: lrclibHit() })), ['youtube-subs', 'manual', 1, null]);
+same('order: LRCLIB wins over auto captions', summary(await lyr.findLyrics(tube, { captions: tracks(autoTrack), fetch: lrclibHit() })), ['lrclib:7', 'lrc', 2, null]);
+same('order: auto captions when LRCLIB misses, flagged to check', summary(await lyr.findLyrics(tube, { captions: tracks(autoTrack), fetch: lrclibMiss() })), [
+  'youtube-auto', 'auto', 5, 'These are YouTube auto captions, so check the words.',
+]);
+same('order: auto captions win over an LRCLIB record far in length', summary(await lyr.findLyrics(tube, { captions: tracks(autoTrack), fetch: lrclibFar() }))?.[0], 'youtube-auto');
+same('order: a far LRCLIB record when there are no captions, with its note', summary(await lyr.findLyrics(tube, { captions: tracks(), fetch: lrclibFar() }))?.slice(0, 2), ['lrclib:5', 'lrc']);
+same('order: nothing anywhere is null', await lyr.findLyrics(tube, { captions: tracks(), fetch: lrclibMiss() }), null);
+same('order: captions failing still tries LRCLIB', summary(await lyr.findLyrics(tube, { captions: async () => Promise.reject(new Error('no yt-dlp')), fetch: lrclibHit() }))?.[0], 'lrclib:7');
+let asked = false;
+const local = { ...(tube as object), source: 'https://soundcloud.com/x/y' } as never;
+same('order: a song not from YouTube goes straight to LRCLIB', [summary(await lyr.findLyrics(local, { captions: async () => ((asked = true), [manualTrack]), fetch: lrclibHit() }))?.[0], asked], ['lrclib:7', false]);
+
+// Found lyrics keep their source on the song. Until they're placed there are no blocks, and the .djw stays clean.
+const sourced = lyr.withFoundLyrics(s, (await lyr.findLyrics(tube, { captions: tracks(), fetch: lrclibHit() }))!);
+same('the song keeps the source and the timed lines', [sourced.lyrics, sourced.timedLyrics?.length], [{ source: 'lrclib:7', blocks: {} }, 2]);
+const sourcedText = djw.serializeDjw(sourced, { includeAudioPath: false });
+const sourcedWarnings: string[] = [];
+same('a source with no blocks writes just the source, no timed lines', [sourcedText.includes('lyrics:\n  source: lrclib:7\nsections:'), /blocks|timed|Shine/.test(sourcedText)], [true, false]);
+same('and reads back the same, with no warnings', [djw.parseDjw(sourcedText, sourcedWarnings).lyrics, sourcedWarnings], [{ source: 'lrclib:7', blocks: {} }, []]);
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);

@@ -3,6 +3,7 @@
 //!
 //! The web build still uses the Node helper. Keep the two in step: same job shape, same yt-dlp flags.
 
+use crate::captions;
 use crate::error::{AppError, Result};
 use regex::Regex;
 use serde::Serialize;
@@ -13,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -127,6 +129,7 @@ impl Downloads {
         let downloads = Arc::clone(self);
         std::thread::spawn(move || {
             let result = downloads.run(&job);
+            let wants_captions = result.is_ok() && job.kind.as_deref() != Some("pad") && captions::youtube(&job.url).is_ok();
             {
                 // One lock for both, so nobody sees a finished job while the queue still looks busy.
                 let mut queue = downloads.queue();
@@ -146,6 +149,10 @@ impl Downloads {
                 queue.busy = false;
             }
             downloads.next();
+            // After the job is done and the next one started, so captions never hold up or fail a download.
+            if wants_captions {
+                downloads.write_captions(&job.url, &downloads.library, Duration::from_secs(60));
+            }
         });
     }
 
@@ -214,6 +221,25 @@ impl Downloads {
                     .map(str::to_owned)
                     .unwrap_or_else(|| format!("yt-dlp exited with code {}", status.code().unwrap_or(-1))),
             )),
+        }
+    }
+
+    /// Saves a YouTube video's English captions into `dir`. Failures are logged, never raised: captions are extra.
+    fn write_captions(&self, url: &str, dir: &Path, limit: Duration) {
+        for (flag, langs, kind) in captions::KINDS {
+            let result = self.yt_dlp().and_then(|mut command| {
+                command
+                    .args(["--no-playlist", "--no-warnings", "--skip-download", flag, "--sub-langs", langs, "--sub-format", "json3/vtt"])
+                    .args(["-o", &format!("subtitle:%(title)s [%(id)s].{kind}.%(ext)s"), "-P"])
+                    .arg(dir)
+                    .args(["--", url])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped());
+                captions::finish(command.spawn()?, limit)
+            });
+            if let Err(error) = result {
+                log::warn!("No {kind} captions for {url}: {error}");
+            }
         }
     }
 
@@ -358,6 +384,30 @@ pub async fn library_file(downloads: State<'_, Shared>, file_name: String) -> Re
         .inside(&downloads.library.join(&file_name))
         .ok_or_else(|| AppError::Message(format!("Could not read {file_name}.")))?;
     Ok(tauri::ipc::Response::new(blocking(move || Ok(std::fs::read(path)?)).await?))
+}
+
+/// A YouTube video's captions, fetched now into a scratch folder that is removed after. Empty when it has none.
+#[tauri::command]
+pub async fn fetch_captions(downloads: State<'_, Shared>, url: String) -> Result<Vec<captions::Track>> {
+    let url = captions::youtube(&url)?;
+    let downloads = Arc::clone(downloads.inner());
+    blocking(move || {
+        let dir = std::env::temp_dir().join(format!("lampcircle-captions-{}-{}", std::process::id(), NEXT_ID.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&dir)?;
+        downloads.write_captions(&url, &dir, Duration::from_secs(60));
+        let tracks = captions::read(&dir, None);
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(tracks)
+    })
+    .await
+}
+
+/// Captions saved beside a downloaded song. `file_name` is its audio file, or a path to it.
+#[tauri::command]
+pub async fn saved_captions(downloads: State<'_, Shared>, file_name: String) -> Result<Vec<captions::Track>> {
+    let stem = Path::new(&file_name).file_stem().and_then(|stem| stem.to_str()).unwrap_or_default().to_owned();
+    let library = downloads.library.clone();
+    blocking(move || Ok(if stem.is_empty() { Vec::new() } else { captions::read(&library, Some(&stem)) })).await
 }
 
 /// Asks where to save `text`, then writes it. False when the person cancels.

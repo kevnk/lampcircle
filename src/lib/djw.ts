@@ -70,7 +70,8 @@ function lyricsOut(lyrics: Lyrics) {
     ...(lyrics.offset === undefined ? {} : { offset: lyrics.offset }),
     ...(lyrics.leadBeats === undefined ? {} : { lead_beats: lyrics.leadBeats }),
     ...(lyrics.fadeBeats === undefined ? {} : { fade_beats: lyrics.fadeBeats }),
-    blocks: Object.fromEntries(Object.entries(lyrics.blocks).map(([id, slides]) => [id, literal(slides)])),
+    // Found lyrics that aren't placed yet have a source and no blocks.
+    ...(Object.keys(lyrics.blocks).length ? { blocks: Object.fromEntries(Object.entries(lyrics.blocks).map(([id, slides]) => [id, literal(slides)])) } : {}),
   };
 }
 

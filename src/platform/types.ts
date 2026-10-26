@@ -1,4 +1,5 @@
 import type { DjwMap } from '../lib/djw';
+import type { CaptionTrack } from '../lib/lyricsFetch';
 
 /** The Mac app's preferences, from the TF Mac app template. The theme stays in theme.ts, where the web app keeps it too. */
 export type Settings = {
@@ -74,6 +75,10 @@ export type Helper = {
   list(url: string): Promise<Array<{ url: string; title: string }>>;
   remove(id: string): Promise<void>;
   file(name: string): Promise<Blob>;
+  /** A YouTube video's captions, fetched now. Empty when it has none. */
+  captions(url: string): Promise<CaptionTrack[]>;
+  /** Captions saved beside a downloaded song's audio file. */
+  savedCaptions(fileName: string): Promise<CaptionTrack[]>;
 };
 
 /** What the app needs from where it runs: the browser, or the Mac app. */

@@ -1,5 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import type { CaptionTrack } from '../lib/lyricsFetch';
 import { normalizeSettings, type Desktop, type DiagnosticsExport, type Job, type LastSession, type Platform, type UpdateCheck, type UpdateProgress } from './types';
 
 function onEvent<T>(name: string, handler: (payload: T) => void): () => void {
@@ -20,6 +21,8 @@ export const tauriPlatform: Platform = {
       const bytes = await invoke<ArrayBuffer>('library_file', { fileName: name });
       return new Blob([bytes], { type: AUDIO_TYPES[name.split('.').pop()?.toLowerCase() ?? ''] ?? '' });
     },
+    captions: url => invoke<CaptionTrack[]>('fetch_captions', { url }),
+    savedCaptions: fileName => invoke<CaptionTrack[]>('saved_captions', { fileName }),
   },
   saveText: (text, fileName) => invoke<boolean>('save_text', { text, fileName }),
 };
