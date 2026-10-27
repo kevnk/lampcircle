@@ -563,6 +563,183 @@ const sourcedWarnings: string[] = [];
 same('a source with no blocks writes just the source, no timed lines', [sourcedText.includes('lyrics:\n  source: lrclib:7\nsections:'), /blocks|timed|Shine/.test(sourcedText)], [true, false]);
 same('and reads back the same, with no warnings', [djw.parseDjw(sourcedText, sourcedWarnings).lyrics, sourcedWarnings], [{ source: 'lrclib:7', blocks: {} }, []]);
 
+// Placing lyrics on bars: clean-up, sections, slides, blocks and the offset. 120 BPM in 4/4, so bar n (from 0)
+// starts at 2n s and each beat is 0.5 s. Words are made up.
+const place = await import('../src/lib/lyricsPlace.ts');
+type Line = import('../src/types.ts').TimedLine;
+type PlacedSong = import('../src/types.ts').Song;
+const at = (bar: number, beat = 1) => bar * 2 + (beat - 1) * 0.5;
+/** Sections as [type, first bar, pickup beats], marked up to `marksEnd` bars. */
+const barSong = (sections: Array<[string, number, number?]>, bars: number, marksEnd = bars) =>
+  ({
+    ...{ id: 'bars', title: 'Made Up Song', artist: 'Made Up Band', duration: bars * 2, peaks: [], chroma: [], beatsPerBar: 4, fill: false },
+    taps: Array.from({ length: bars * 4 }, (_, i) => ({ t: i * 0.5, one: i % 4 === 0 })),
+    sections: sections.map(([type, bar, pickupBeats = 1], i) => ({ id: `s${i}`, type, at: at(bar), pickupBeats, fadeInBeats: 1, fadeOutBeats: 1, repeats: 1, jumpAt: 'phrase' })),
+    ...{ marksEnd: at(marksEnd), refined: true, updatedAt: 0, addedAt: 0 },
+  }) as PlacedSong;
+const line = (start: number, end: number, text: string, kind: Line['kind'] = 'lrc'): Line => ({ start, end, text, kind });
+/** A record keyed by section id, keyed by section name instead. */
+const byName = <T>(song: PlacedSong, record: Record<string, T>) =>
+  Object.fromEntries(map.sectionViews(song).filter(v => record[v.section.id]).map(v => [v.name, record[v.section.id]]));
+
+const twoSong = barSong([['verse', 0], ['chorus', 4]], 8);
+const twoGrid = map.songGrid(twoSong);
+const tidy = (lines: Line[]) => timed(place.tidyLines(lyr.cleanLines(lines), twoGrid, 4));
+same('clean-up: [Music] out, the same words starting within a beat are one line, a real repeat stays', tidy([
+  line(0.5, 2, '[Music]', 'manual'),
+  line(2, 4, 'Alpha beta gamma', 'manual'),
+  line(2.3, 4.5, 'alpha beta gamma!', 'manual'),
+  line(6, 8, 'Alpha beta gamma', 'manual'),
+]), [[2, 4.5, 'Alpha beta gamma', 'manual'], [6, 8, 'Alpha beta gamma', 'manual']]);
+const autoLines = [
+  line(2, 7, 'one two three four five six seven eight nine ten', 'auto'),
+  line(7.3, 8.3, 'eleven twelve', 'auto'),
+  line(8.4, 8.9, 'thirteen', 'auto'),
+];
+same('auto captions are rebuilt: a new line on a downbeat after 6 words, or at a half-beat gap, capitalized', tidy(autoLines), [
+  [2, 6, 'One two three four five six seven eight', 'auto'],
+  [6, 7, 'Nine ten', 'auto'],
+  [7.3, 8.9, 'Eleven twelve thirteen', 'auto'],
+]);
+same('a long line splits at a comma near the middle, else the middle word, its time split to match', tidy([
+  line(1, 6.1, 'Alpha beta gamma delta, epsilon zeta eta theta iota', 'manual'),
+  line(8, 13.6, 'Alpha beta gamma delta epsilon zeta eta theta iota kappa', 'manual'),
+]), [
+  [1, 3.3, 'Alpha beta gamma delta,', 'manual'],
+  [3.3, 6.1, 'epsilon zeta eta theta iota', 'manual'],
+  [8, 11, 'Alpha beta gamma delta epsilon', 'manual'],
+  [11, 13.6, 'zeta eta theta iota kappa', 'manual'],
+]);
+same('an LRC line lasts until the next starts, at most 2 bars; a caption keeps its end', [tidy([line(2, 10, 'Alpha'), line(12, 13, 'Beta')]), tidy([line(2, 10, 'Alpha', 'manual')])], [
+  [[2, 6, 'Alpha', 'lrc'], [12, 13, 'Beta', 'lrc']],
+  [[2, 10, 'Alpha', 'manual']],
+]);
+same('auto caption slides are marked to check, by section and slide', byName(twoSong, place.placeLyrics(twoSong, autoLines, { source: 'youtube-auto' }).checkWords), { Verse: [0], Chorus: [0] });
+
+/** Which sections a single line lands in. The Verse is bars 0-4, the Chorus bars 4-8 (8 s on), with a 1-beat pickup. */
+const home = (one: Line, options: Partial<import('../src/lib/lyricsPlace.ts').PlaceOptions> = {}) =>
+  Object.keys(byName(twoSong, place.placeLyrics(twoSong, [one], { source: 'manual', ...options }).sectionLyrics));
+same('a line goes to the section it overlaps most, or the next one when it starts in its pickup or a beat before', [
+  home(line(2, 4, 'Inside the verse')),
+  home(line(5.5, 8.5, 'Mostly in the verse')),
+  home(line(6.5, 10, 'Mostly in the chorus')),
+  home(line(7, 7.9, 'Two beats early')),
+  home(line(6.5, 7.9, 'Three beats early')),
+], [['Verse'], ['Verse'], ['Chorus'], ['Chorus'], ['Verse']]);
+const nudged = (offset: number, autoOffset = false) => {
+  const placed = place.placeLyrics(twoSong, [line(6, 7.5, 'Bar three')], { source: 'manual', offset, autoOffset });
+  return [Object.keys(byName(twoSong, placed.sectionLyrics)), placed.offsetUsed, placed.lyrics.offset];
+};
+same('a nudge moves every line before placing, at most 2 s either way, and is what lyrics.offset keeps', [nudged(2), nudged(5), nudged(-1)], [
+  [['Chorus'], 2, 2],
+  [['Chorus'], 2, 2],
+  [['Verse'], -1, -1],
+]);
+
+// A whole song: Intro 0-4, Verse 1 4-12, Chorus 1 12-16, Verse 2 16-24, Chorus 2 24-28, Chorus 3 28-32, Bridge 32-36,
+// then 4 bars not in a section. Chorus 2 changes one word of a 14-word slide, Chorus 3 changes a line.
+const sungSong = barSong([['intro', 0, 0], ['verse', 4], ['chorus', 12], ['verse', 16], ['chorus', 24], ['chorus', 28], ['bridge', 32, 0]], 40, 36);
+const chorusAt = (bar: number, words: string[]) =>
+  words.map((text, i) => line(i ? at(bar + i) : at(bar - 1, 4), at(bar + i) + 1.8, text));
+const chorusWords = ['Chorus line one of made up words', 'Chorus line two of made up words', 'Chorus line three of made up words', 'Chorus line four of made up words'];
+const sungLines = [
+  line(at(3, 4), 9.8, 'Verse one first'),
+  line(at(5), 11.4, 'Verse one second'),
+  line(at(5, 4), 13.8, 'Verse one third'),
+  line(at(7), 15.8, 'Verse one fourth'),
+  line(at(8, 2), 17.8, 'Verse one fifth'),
+  line(at(11, 2), 23.4, 'Verse one sixth'),
+  ...chorusAt(12, chorusWords),
+  line(at(16), 33.8, 'Verse two first'),
+  line(at(17), 35.8, 'Verse two second'),
+  line(at(22), 45.8, 'Verse two third'),
+  line(at(23), 47.4, 'Verse two fourth'),
+  ...chorusAt(24, chorusWords.map(text => text.replace('two', 'too'))),
+  ...chorusAt(28, [...chorusWords.slice(0, 3), 'A different ending']),
+  line(at(32), 66, 'Bridge words here'),
+  line(at(37), 76, 'Words after the last section'),
+];
+const placedSong = place.placeLyrics(sungSong, sungLines, { source: 'lrclib:1' });
+same('blocks: 2 lines a slide, a slide early after 2 bars of quiet, a blank for 4, a chorus shared, a changed one apart', placedSong.lyrics, {
+  source: 'lrclib:1',
+  offset: 0,
+  blocks: {
+    'verse-1': [['Verse one first', 'Verse one second'], ['Verse one third', 'Verse one fourth'], ['Verse one fifth'], ['Verse one sixth']],
+    chorus: [chorusWords.slice(0, 2), chorusWords.slice(2)],
+    'verse-2': [['Verse two first', 'Verse two second'], [], ['Verse two third', 'Verse two fourth']],
+    'chorus-3': [chorusWords.slice(0, 2), [chorusWords[2], 'A different ending']],
+    bridge: [['Bridge words here']],
+  },
+});
+same('slide bars: from each section start, a beat before a bar snaps on to it, later in a bar snaps back', byName(sungSong, placedSong.sectionLyrics), {
+  'Verse 1': { block: 'verse-1', slideBars: [0, 2, 4, 7] },
+  'Chorus 1': { block: 'chorus', slideBars: [0, 2] },
+  'Verse 2': { block: 'verse-2', slideBars: [0, 2, 6] },
+  'Chorus 2': { block: 'chorus', slideBars: [0, 2] },
+  'Chorus 3': { block: 'chorus-3', slideBars: [0, 2] },
+  Bridge: { block: 'bridge', slideBars: [0] },
+});
+same('words after the last section are unplaced, and nothing needs checking', [timed(placedSong.unplaced), placedSong.checkWords, placedSong.offsetUsed, placedSong.offsetEstimated], [
+  [[74, 76, 'Words after the last section', 'lrc']],
+  {},
+  0,
+  false,
+]);
+const perSlide = (n: number) => {
+  const placed = place.placeLyrics(sungSong, sungLines, { source: 'lrclib:1', linesPerSlide: n });
+  return [placed.lyrics.blocks['verse-1'].map(slide => slide.length), byName(sungSong, placed.sectionLyrics)['Verse 1'].slideBars];
+};
+same('lines per slide: 1 and 4', [perSlide(1), perSlide(4)], [[[1, 1, 1, 1, 1, 1], [0, 1, 2, 3, 4, 7]], [[4, 1, 1], [0, 4, 7]]]);
+const longSong = barSong([['verse', 0]], 16);
+const lone = (lines: Line[]) => {
+  const placed = place.placeLyrics(longSong, lines, { source: 'manual', linesPerSlide: 1 });
+  return [placed.lyrics.blocks.verse, placed.sectionLyrics.s0.slideBars];
+};
+same('words 4 bars into a section open on a blank, 4 quiet bars at its end go blank, slides on one bar are one', [
+  lone([line(at(6), at(7), 'Late words')]),
+  lone([line(at(1), at(1, 2), 'Quick'), line(at(1, 2), at(1, 3), 'words')]),
+], [
+  [[[], ['Late words'], []], [0, 6, 7]],
+  [[['Quick', 'words'], []], [0, 2]],
+]);
+const twoVerses = barSong([['verse', 0], ['verse', 4]], 8);
+const versesWith = (second: string) =>
+  Object.keys(place.placeLyrics(twoVerses, [
+    line(0, 1.5, 'a b c d e f g h i j'), line(at(2), at(2) + 1.5, 'yes'), line(at(4), at(4) + 1.5, 'a b c d e f g h i j'), line(at(6), at(6) + 1.5, second),
+  ], { source: 'manual', linesPerSlide: 1 }).lyrics.blocks);
+same('verses share a block only when every slide matches: 10 of 11 words is not enough if a slide differs', [versesWith('yes'), versesWith('no')], [['verse'], ['verse-1', 'verse-2']]);
+const pickupSong = barSong([['intro', 0, 0], ['verse', 4, 2]], 8);
+same('quiet after a pickup line counts from where it ends, before the section starts', place.placeLyrics(pickupSong, [line(7, 7.5, 'Pickup'), line(11.5, 12.5, 'Two bars on')], { source: 'manual' }).sectionLyrics.s1, {
+  block: 'verse',
+  slideBars: [0, 2],
+});
+
+const moved = (by: number) => sungLines.map(item => ({ ...item, start: item.start + by, end: item.end + by }));
+const estimated = place.placeLyrics(sungSong, moved(-3), { source: 'lrclib:1', autoOffset: true });
+same('auto-offset finds a record 3 s early from downbeats and section starts, and places it the same', [
+  estimated.offsetUsed, estimated.offsetEstimated, estimated.lyrics, estimated.sectionLyrics,
+], [3, true, placedSong.lyrics, placedSong.sectionLyrics]);
+same('and one 3 s late, not a whole bar or two off', place.placeLyrics(sungSong, moved(3), { source: 'lrclib:1', autoOffset: true }).offsetUsed, -3);
+const estimatedNudge = place.placeLyrics(sungSong, moved(-3), { source: 'lrclib:1', autoOffset: true, offset: 0.5 });
+same('a nudge moves the estimate, and lyrics.offset keeps just the nudge', [estimatedNudge.offsetUsed, estimatedNudge.lyrics.offset], [3.5, 0.5]);
+
+// A placed song keeps its lead and fade, drops a lyric its section no longer has, and survives a .djw round trip.
+const before = { ...sungSong, lyrics: { leadBeats: 3, fadeBeats: 0.5, blocks: { old: [['Old words']] } }, sections: sungSong.sections.map((x, i) => (i ? x : { ...x, lyric: { block: 'old', slideBars: [0] } })) };
+const sungPlaced = place.withPlacement(before, placedSong);
+const placedWarnings: string[] = [];
+const placedBack = djw.parseDjw(djw.serializeDjw(sungPlaced, { includeAudioPath: false }), placedWarnings);
+same('a placed song exported and read back keeps its words, lead, fade and slide bars', [placedBack.lyrics, placedBack.sections.map(x => x.lyric ?? null), placedWarnings], [
+  { source: 'lrclib:1', offset: 0, leadBeats: 3, fadeBeats: 0.5, blocks: placedSong.lyrics.blocks },
+  [null, ...Object.values(byName(sungSong, placedSong.sectionLyrics))],
+  [],
+]);
+
+const farPlaced = await place.findAndPlaceLyrics(tube, { captions: tracks(), fetch: lrclibFar() });
+const nearPlaced = await place.findAndPlaceLyrics(tube, { captions: tracks(), fetch: lrclibHit() });
+same('find and place: a far LRCLIB record gets its offset estimated, a matching one does not', [
+  farPlaced?.placement.offsetEstimated, nearPlaced?.placement.offsetEstimated, nearPlaced?.song.lyrics?.source, nearPlaced?.song.timedLyrics?.length,
+], [true, false, 'lrclib:7', 2]);
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);
