@@ -40,5 +40,6 @@ export default {
       },
     },
   },
-  plugins: [],
+  // `ios:` styles only the iPhone and iPad app, which main.tsx marks with html.ios.
+  plugins: [({ addVariant }) => addVariant('ios', '.ios &')],
 };

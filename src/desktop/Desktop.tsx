@@ -21,7 +21,7 @@ export function Desktop() {
     const takeOpened = () =>
       desktop
         .takeOpenedFiles()
-        .then(files => files.length && openFiles(files.map(file => new File([file.text], file.name))))
+        .then(files => void (files.length && openFiles(files.map(file => new File([file.text], file.name)))))
         .catch(error => captureException(error, { mechanism: 'open.files' }));
     const stopOpened = desktop.onFilesOpened(() => void takeOpened());
     void Promise.all([desktop.getSettings(), takeOpened()])

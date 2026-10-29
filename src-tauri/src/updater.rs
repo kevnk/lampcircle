@@ -3,15 +3,20 @@
 
 use crate::error::{AppError, Result};
 use serde::Serialize;
+#[cfg(desktop)]
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+#[cfg(desktop)]
 use std::sync::Mutex;
 use tauri::ipc::Channel;
 use tauri::AppHandle;
+#[cfg(desktop)]
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 #[derive(Default)]
 pub struct Pending {
+    #[cfg(desktop)]
     update: Mutex<Option<Update>>,
+    #[cfg(desktop)]
     installing: AtomicBool,
 }
 
@@ -34,6 +39,7 @@ pub struct UpdateCheck {
 
 #[derive(Serialize, Clone)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[cfg_attr(mobile, allow(dead_code))]
 pub enum UpdateProgress {
     #[serde(rename_all = "camelCase")]
     Progress {
@@ -44,8 +50,10 @@ pub enum UpdateProgress {
     Installed,
 }
 
+#[cfg(desktop)]
 pub const SUPPORTED: bool = !cfg!(debug_assertions);
 
+#[cfg(desktop)]
 pub async fn check(app: &AppHandle, pending: &Pending) -> Result<UpdateCheck> {
     let current = app.package_info().version.to_string();
     if !SUPPORTED {
@@ -88,6 +96,7 @@ pub async fn check(app: &AppHandle, pending: &Pending) -> Result<UpdateCheck> {
     }
 }
 
+#[cfg(desktop)]
 pub async fn install(
     app: &AppHandle,
     pending: &Pending,
@@ -129,6 +138,29 @@ pub async fn install(
     result
 }
 
+/// iPhone and iPad builds update through the App Store or TestFlight, not this updater.
+#[cfg(mobile)]
+pub async fn check(app: &AppHandle, _pending: &Pending) -> Result<UpdateCheck> {
+    crate::analytics::track_update_checked(app, "unsupported");
+    Ok(UpdateCheck {
+        current: app.package_info().version.to_string(),
+        supported: false,
+        update: None,
+    })
+}
+
+#[cfg(mobile)]
+pub async fn install(
+    _app: &AppHandle,
+    _pending: &Pending,
+    _channel: Channel<UpdateProgress>,
+) -> Result<()> {
+    Err(AppError::Message(
+        "Updates come from the App Store or TestFlight.".into(),
+    ))
+}
+
+#[cfg(desktop)]
 fn describe(error: tauri_plugin_updater::Error) -> AppError {
     use tauri_plugin_updater::Error;
 

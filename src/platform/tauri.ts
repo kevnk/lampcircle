@@ -1,6 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { normalizeSettings, type Desktop, type DiagnosticsExport, type Job, type LastSession, type Platform, type UpdateCheck, type UpdateProgress } from './types';
+import { normalizeSettings, type Desktop, type DiagnosticsExport, type Job, type LastSession, type Mobile, type Platform, type UpdateCheck, type UpdateProgress } from './types';
 
 function onEvent<T>(name: string, handler: (payload: T) => void): () => void {
   const unlisten = listen<T>(name, event => handler(event.payload));
@@ -46,4 +46,26 @@ export const desktop: Desktop = {
   exportDiagnostics: () => invoke<DiagnosticsExport | null>('export_diagnostics'),
   takeOpenedFiles: () => invoke<Array<{ name: string; text: string }>>('take_opened_files'),
   onFilesOpened: handler => onEvent<null>('files-opened', handler),
+};
+
+/** The Files picker also offers these, which the Mac library never holds. */
+const PICKED_TYPES: Record<string, string> = { ...AUDIO_TYPES, aif: 'audio/aiff', aiff: 'audio/aiff', caf: 'audio/x-caf' };
+
+/** Reads the files src-tauri/src/ios.rs frames into one body: the header's length as a little-endian u32, a JSON header, then each file's bytes. */
+export function unpack(body: ArrayBuffer): { files: File[]; route?: string } {
+  const length = new DataView(body).getUint32(0, true);
+  const header: { route?: string; files: Array<{ name: string; size: number }> } = JSON.parse(new TextDecoder().decode(new Uint8Array(body, 4, length)));
+  let at = 4 + length;
+  const files = header.files.map(({ name, size }) => {
+    const file = new File([new Uint8Array(body, at, size)], name, { type: PICKED_TYPES[name.split('.').pop()?.toLowerCase() ?? ''] ?? '' });
+    at += size;
+    return file;
+  });
+  return { files, route: header.route };
+}
+
+export const mobile: Mobile = {
+  pickImportFiles: async () => unpack(await invoke<ArrayBuffer>('pick_import_files')).files,
+  setKeepAwake: enabled => invoke<void>('set_keep_awake', { enabled }),
+  takeDevSeed: async () => unpack(await invoke<ArrayBuffer>('take_dev_seed')),
 };

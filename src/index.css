@@ -164,3 +164,33 @@ option {
     animation: none;
   }
 }
+
+/* iPhone and iPad. The page lays out the safe areas itself, with env(safe-area-inset-*): see src-tauri/src/ios.rs. */
+.ios,
+.ios body {
+  overflow-x: clip;
+}
+
+/* 44pt touch targets. Text links stay inline in their sentences. */
+.ios button:not(.underline),
+.ios select {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Controls do not select as text or open the long-press callout, and a quick second tap is not a zoom. */
+.ios :is(button, select, label, nav, img, [role='button'], [role='option'], [role='radio'], [role='switch']) {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+/* No specificity, so a control's own touch-action, like Stop's touch-none, still wins. */
+:where(.ios) :where(button, select, label, input, [role='button']) {
+  touch-action: manipulation;
+}
+
+/* Below 16px, focusing a field zooms the page. Low specificity, so a field's own larger size still wins. */
+:where(.ios) :is(input, select, textarea) {
+  font-size: max(16px, 1em);
+}

@@ -77,6 +77,7 @@ pub fn track_update_checked(app: &AppHandle, result: &str) {
     }
 }
 
+#[cfg(desktop)]
 pub fn track_update_installed(app: &AppHandle, from_version: &str, to_version: &str) {
     if !enabled(app) {
         return;

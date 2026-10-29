@@ -3,24 +3,30 @@ import { AudioLines, ListMusic, Play, Search, Square, Trash2 } from 'lucide-reac
 import type { Song } from '../types';
 import { go, useStore } from '../store';
 import { Button, Card, Label, LinkButton, Menu, MenuItem, MiniStrip, RestingBars } from '../ui';
-import { PAD_ALBUM, helper, importPad, importSong, jobKind, mapForRecording, queueLink, splitTitle, type Job } from '../lib/library';
+import { PAD_ALBUM, helper, importPad, importSong, jobKind, mapForRecording, nameMatch, queueLink, splitTitle, type Job } from '../lib/library';
 import { parseDjw, type DjwMap } from '../lib/djw';
 import { KEY_NAMES } from '../lib/music';
 import { STEP_LABEL, bpmOf, clock, keysText, nextStep, sectionViews, songGrid, songKeys, type Step } from '../lib/songMap';
 import { transport } from '../audio/engine';
 import { getAudio } from '../lib/db';
 import { libraryFileName, packLibrary } from '../lib/backup';
-import { isTauri } from '../platform';
+import { isIOS, isTauri, mobile } from '../platform';
 import { download } from '../platform/browser';
 
-/** Files the Mac app was asked to open, like a .djw double-clicked in Finder, waiting for Library to add them. */
-const opened: File[] = [];
+const ios = isIOS();
+const isMap = (file: File) => /\.(djw|ya?ml)$/i.test(file.name);
+
+/** Files waiting for Library to add them: a .djw double-clicked in Finder, or the iOS debug seed. */
+const opened: Array<{ files: File[]; done: (songs: Song[]) => void }> = [];
 const onOpened = new Set<() => void>();
 
-export function openFiles(files: File[]) {
-  opened.push(...files);
-  go({ page: 'library' });
-  onOpened.forEach(listener => listener());
+/** Adds files as Library's own buttons do. Gives back the songs added. */
+export function openFiles(files: File[]): Promise<Song[]> {
+  return new Promise(done => {
+    opened.push({ files, done });
+    go({ page: 'library' });
+    onOpened.forEach(listener => listener());
+  });
 }
 
 export function Library() {
@@ -54,14 +60,17 @@ export function Library() {
     go({ page: 'song', id: song.id, step: step === 'sections' ? 'tap' : step });
   };
 
-  const addFiles = async (files: FileList | File[]) => {
+  const addFiles = async (files: FileList | File[]): Promise<Song[]> => {
     let maps = waiting;
-    for (const file of Array.from(files)) {
+    const added: Song[] = [];
+    const add = async (file: File) => {
       try {
-        if (/\.(djw|ya?ml)$/i.test(file.name)) {
-          await openDjw(file);
-        } else if (maps.length) {
-          const map = mapForRecording(maps, choosing.current)!;
+        if (isMap(file)) {
+          const result = await openDjw(file);
+          if (result && 'addedAt' in result) added.push(result);
+          else if (result && ios) maps = [...maps, result];
+        } else if (maps.length && !(ios && tab === 'pads')) {
+          const map = mapForRecording(maps, choosing.current, ios ? file.name : undefined)!;
           choosing.current = null;
           // Taken off the queue before the import, so audio added meanwhile goes to the next map. It goes back if this fails.
           maps = maps.filter(item => item !== map);
@@ -71,6 +80,7 @@ export function Library() {
             throw error;
           });
           store.addSong(song);
+          added.push(song);
           setSelectedId(song.id);
           setNotice(`${song.title} is in your library with its map.`);
         } else if (tab === 'pads') {
@@ -78,17 +88,32 @@ export function Library() {
         } else {
           const song = await importSong(file, { ...splitTitle(file.name), audioFile: file.name });
           store.addSong(song);
+          added.push(song);
           setSelectedId(song.id);
         }
       } catch (error) {
         setNotice(error instanceof Error ? error.message : `Could not read ${file.name}.`);
       }
+    };
+    const all = Array.from(files);
+    if (!ios) {
+      for (const file of all) await add(file);
+      return added;
     }
+    // On iOS a map and its recording are picked together: the maps go first, then the recordings that name
+    // a map, so a recording with a plain file name cannot take another song's map, then the rest in order.
+    for (const file of all.filter(isMap)) await add(file);
+    const recordings = all.filter(file => !isMap(file));
+    const named = recordings.filter(file => maps.some(map => nameMatch(map, file.name) > 0));
+    for (const file of [...named, ...recordings.filter(file => !named.includes(file))]) await add(file);
+    return added;
   };
 
-  const openDjw = async (file: File) => {
+  /** The song a map made, or the map itself while it waits for its recording. */
+  const openDjw = async (file: File): Promise<Song | DjwMap | undefined> => {
     const map = parseDjw(await file.text());
-    if (map.source) {
+    // iOS cannot run yt-dlp, so there a map from YouTube waits for its recording from Files.
+    if (map.source && !ios) {
       await helper.add(map.source, 'song', map);
       store.refreshJobs();
       setNotice(`Downloading the audio for ${map.title}.`);
@@ -100,20 +125,22 @@ export function Library() {
       const song = await importSong(blob, { title: map.title, artist: map.artist, audioFile: map.audioFile }, map);
       store.addSong(song);
       setSelectedId(song.id);
-      return;
+      return song;
     }
     setWaiting(list => [...list, map]);
+    return map;
   };
 
   const addLatest = useRef(addFiles);
   addLatest.current = addFiles;
   useEffect(() => {
-    const take = () => {
-      if (opened.length) void addLatest.current(opened.splice(0));
+    const take = async () => {
+      for (const { files, done } of opened.splice(0)) done(await addLatest.current(files));
     };
-    take();
-    onOpened.add(take);
-    return () => void onOpened.delete(take);
+    const listener = () => void take();
+    listener();
+    onOpened.add(listener);
+    return () => void onOpened.delete(listener);
   }, []);
 
   const removeSong = (song: Song) => {
@@ -153,7 +180,7 @@ export function Library() {
     <div>
       <header className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-4xl font-extrabold tracking-tight">Library</h1>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 ios:flex-wrap">
           <div className="mr-2 inline-flex rounded-full border border-line p-1" role="group" aria-label="Show">
             {(
               [
@@ -265,7 +292,18 @@ export function Library() {
         </Card>
       ))}
 
-      <AddFromYouTube tab={tab} onFile={() => audioInput.current?.click()} onDropFiles={files => void addFiles(files)} />
+      {ios ? (
+        <ImportFromFiles
+          tab={tab}
+          onFiles={files => {
+            // A Choose audio picker that was closed without a file leaves its map chosen. This pick names its own maps.
+            choosing.current = null;
+            return addFiles(files);
+          }}
+        />
+      ) : (
+        <AddFromYouTube tab={tab} onFile={() => audioInput.current?.click()} onDropFiles={files => void addFiles(files)} />
+      )}
       <input
         ref={audioInput}
         type="file"
@@ -283,7 +321,7 @@ export function Library() {
           {tab === 'songs' ? (
             <SongTable
               songs={shown}
-              empty={songs.length ? `No songs match “${query.trim()}”.` : 'No songs yet. Paste a YouTube link above or add an audio file.'}
+              empty={songs.length ? `No songs match “${query.trim()}”.` : ios ? 'No songs yet. Import a recording, and its .djw map if you have one.' : 'No songs yet. Paste a YouTube link above or add an audio file.'}
               selected={selected}
               onSelect={setSelectedId}
               onStep={openStep}
@@ -313,6 +351,36 @@ export function Library() {
         )}
       </div>
     </div>
+  );
+}
+
+/** iPhone and iPad: yt-dlp cannot run there, so songs and pads come from the Files app, each .djw map with its recording. */
+function ImportFromFiles({ tab, onFiles }: { tab: 'songs' | 'pads'; onFiles: (files: File[]) => Promise<unknown> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pick = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const files = await mobile.pickImportFiles();
+      if (files.length) await onFiles(files);
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card className="px-5 py-4">
+      <p className="text-[17px] font-medium">{tab === 'pads' ? 'Add pads' : 'Add songs'}</p>
+      <p className="mt-1 text-sm text-muted">
+        {tab === 'pads' ? 'Pick pad recordings, one for each key.' : 'Pick recordings, and the .djw maps made for them on your Mac. A map and its recording can come in together.'}
+      </p>
+      <Button tone="primary" className="mt-3 w-full" disabled={busy} onClick={() => void pick()}>
+        {busy ? 'Adding…' : 'Import from Files'}
+      </Button>
+      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+    </Card>
   );
 }
 
@@ -443,9 +511,9 @@ function SongTable({ songs, empty, selected, onSelect, onStep, inSet }: { songs:
       <thead>
         <tr className="caps border-b border-line text-muted">
           <th className="px-4 py-3">Song</th>
-          <th className="w-20 py-3">BPM</th>
-          <th className="w-24 py-3">Keys</th>
-          <th className="w-40 py-3 pr-4">Next step</th>
+          <th className="w-20 py-3 ios:max-sm:hidden">BPM</th>
+          <th className="w-24 py-3 ios:max-sm:hidden">Keys</th>
+          <th className="w-40 py-3 pr-4 ios:max-sm:w-auto">Next step</th>
         </tr>
       </thead>
       <tbody>
@@ -468,10 +536,16 @@ function SongTable({ songs, empty, selected, onSelect, onStep, inSet }: { songs:
             >
               <td className="px-4 py-3">
                 <p className="font-medium">{song.title}</p>
-                <p className="text-sm text-muted">{song.artist || 'Unknown artist'}</p>
+                <p className="text-sm text-muted">
+                  {song.artist || 'Unknown artist'}
+                  <span className="tabular hidden ios:max-sm:inline">
+                    {' '}
+                    · {bpm ? `${Math.round(bpm)} BPM` : '—'} · {keysText(songKeys(song))}
+                  </span>
+                </p>
               </td>
-              <td className="tabular">{bpm ? Math.round(bpm) : '—'}</td>
-              <td className="tabular">{keysText(songKeys(song))}</td>
+              <td className="tabular ios:max-sm:hidden">{bpm ? Math.round(bpm) : '—'}</td>
+              <td className="tabular ios:max-sm:hidden">{keysText(songKeys(song))}</td>
               <td className="pr-4">
                 <LinkButton
                   onClick={event => {
@@ -524,20 +598,20 @@ function PadTable() {
   };
   const keys = (
     <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
-      <div className="flex gap-1" aria-label={`Pads in ${pads.length ? [...have].map(tonic => KEY_NAMES[tonic]).join(', ') : 'no keys yet'}`}>
+      <div className="flex gap-1 ios:flex-wrap" aria-label={`Pads in ${pads.length ? [...have].map(tonic => KEY_NAMES[tonic]).join(', ') : 'no keys yet'}`}>
         {KEY_NAMES.map((name, tonic) => (
           <span key={name} className={`w-9 rounded-full py-1 text-center text-xs font-semibold ${have.has(tonic) ? 'bg-accent-soft text-amber ring-1 ring-accent/40' : 'border border-dashed border-faint text-muted'}`}>
             {name}
           </span>
         ))}
       </div>
-      {missing.length > 0 && (
+      {missing.length > 0 && !ios && (
         <Button className="ml-auto px-3.5 py-2 text-sm" disabled={coming > 0 || asking} onClick={() => void getMissing()}>
           {asking ? 'Finding the album…' : coming > 0 ? `Downloading ${coming} pad${coming === 1 ? '' : 's'}…` : missing.length === 12 ? 'Get all 12 keys' : `Get the ${missing.length} missing key${missing.length === 1 ? '' : 's'}`}
         </Button>
       )}
       <p className="w-full text-xs text-muted">
-        {missing.length > 0 ? `From ${PAD_ALBUM.name} on YouTube. Or paste any pad link above.` : 'Every key has a pad.'}
+        {missing.length === 0 ? 'Every key has a pad.' : ios ? 'Import pad recordings from Files above.' : `From ${PAD_ALBUM.name} on YouTube. Or paste any pad link above.`}
         {error && <span className="ml-2 text-danger">{error}</span>}
       </p>
     </div>
@@ -561,7 +635,7 @@ function PadTable() {
         <tr className="caps border-b border-line text-muted">
           <th className="px-4 py-3">Pad</th>
           <th className="w-24 py-3">Key</th>
-          <th className="w-24 py-3">Length</th>
+          <th className="w-24 py-3 ios:max-sm:hidden">Length</th>
           <th className="w-28 py-3 pr-4">
             <span className="sr-only">Actions</span>
           </th>
@@ -585,7 +659,7 @@ function PadTable() {
                 ))}
               </select>
             </td>
-            <td className="tabular text-sm">{clock(pad.duration)}</td>
+            <td className="tabular text-sm ios:max-sm:hidden">{clock(pad.duration)}</td>
             <td className="pr-4">
               <div className="flex justify-end gap-1">
                 <button type="button" className="rounded-full p-2 text-amber hover:bg-raised" aria-label={`${playing === pad.id ? 'Stop' : 'Preview'} ${pad.title}`} onClick={() => void preview(pad.id)}>

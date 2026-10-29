@@ -103,6 +103,30 @@ const [wayMaker, goodFather] = [{ title: 'Way Maker' }, { title: 'Good Good Fath
 same('a recording goes to the map waiting longest', lib.mapForRecording([wayMaker, goodFather], null), wayMaker);
 same('or to the map you chose audio for', lib.mapForRecording([wayMaker, goodFather], goodFather), goodFather);
 same('a choice that is no longer waiting goes to the oldest', lib.mapForRecording([goodFather], wayMaker), goodFather);
+// On iOS a map and its recording come in together, so a recording's file name finds its map.
+const exported = { title: 'Holy Forever', audioFile: '/Users/me/Music/hf-live.m4a' } as never;
+same('a file name with the title goes to that map', lib.mapForRecording([wayMaker, goodFather], null, 'Good-Good-Father [abc123].mp3'), goodFather);
+same('a file name matching the saved audio path goes to that map', lib.mapForRecording([wayMaker, exported], null, 'hf-live.m4a'), exported);
+same('a file name matching no map goes to the oldest', lib.mapForRecording([wayMaker, goodFather], null, 'voice memo.m4a'), wayMaker);
+same('the map you chose audio for still wins', lib.mapForRecording([wayMaker, goodFather], wayMaker, 'good-good-father.mp3'), wayMaker);
+same('a recording names its map by title or saved file', [lib.nameMatch(goodFather, 'Good Good Father.m4a') > 0, lib.nameMatch(exported, 'HF-Live.M4A') > 0, lib.nameMatch(wayMaker, 'Track 01.mp3')], [true, true, 0]);
+const [holy, holyForever, cuan] = [{ title: 'Holy' }, { title: 'Holy Forever' }, { title: 'Cuán Grande Es Él' }] as never[];
+same('the longest title a file name holds wins', [lib.mapForRecording([holy, holyForever], null, 'Holy Forever (Live).mp3'), lib.mapForRecording([holyForever, holy], null, 'holy.mp3')], [holyForever, holy]);
+same('accents do not stop a match', lib.mapForRecording([wayMaker, cuan], null, 'Cuan Grande Es El.m4a'), cuan);
+
+// iOS hands Files picks and the dev seed over as one body: a u32 header length, a JSON header, then the bytes (src-tauri/src/ios.rs).
+const { unpack } = await import('../src/platform/tauri.ts');
+const header = new TextEncoder().encode(JSON.stringify({ route: 'tap', files: [{ name: 'a.djw', size: 6 }, { name: 'b.mp3', size: 2 }] }));
+const body = new Uint8Array(4 + header.length + 8);
+new DataView(body.buffer).setUint32(0, header.length, true);
+body.set(header, 4);
+body.set([...new TextEncoder().encode('djw: 2'), 0, 255], 4 + header.length);
+const framed = unpack(body.buffer);
+same('framed files come back by name, type and bytes', await Promise.all(framed.files.map(async file => [file.name, file.type, [...new Uint8Array(await file.arrayBuffer())]])), [
+  ['a.djw', '', [100, 106, 119, 58, 32, 50]],
+  ['b.mp3', 'audio/mpeg', [0, 255]],
+]);
+same('framed files keep the route', framed.route, 'tap');
 
 // Keys and theory.
 const D = music.parseKey('D')!;

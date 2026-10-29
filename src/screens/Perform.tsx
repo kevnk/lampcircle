@@ -2,12 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Pause, Play, Square } from 'lucide-react';
 import type { Song, WorshipSet } from '../types';
 import { go, useStore } from '../store';
-import { ThemeToggle, useFrame, useKeys } from '../ui';
+import { HoldButton, ThemeToggle, useFrame, useKeys } from '../ui';
 import { PerformSession, now, padSourceFor, perfSong, release, type PerfSong, type Snapshot } from '../audio/engine';
 import { KEY_NAMES, padFit, padGroups, waysIn } from '../lib/music';
 import { barSeconds, clock, keyOf, planSeconds, sectionViews, songGrid, songKeys, type SectionView } from '../lib/songMap';
 import type { JumpFade, Reason } from '../lib/performPlan';
 import { livePad, songBpm, wayIn } from './Sets';
+import { isIOS, mobile } from '../platform';
+
+const ios = isIOS();
 
 type PadMode = 'simple' | 'guided' | 'advanced';
 interface Prefs {
@@ -82,6 +85,13 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
     if (patch.padVolume !== undefined) sessionRef.current?.setPadVolume(patch.padVolume);
     if (sessionRef.current) Object.assign(sessionRef.current, { jumpFade: next.jumpFade, fillGaps: next.fillGaps, padCrossfade: next.crossfade });
   };
+
+  // The phone must not lock mid-song.
+  useEffect(() => {
+    if (!ios) return;
+    void mobile.setKeepAwake(true).catch(() => undefined);
+    return () => void mobile.setKeepAwake(false).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     const session = new PerformSession(padSourceFor(pads));
@@ -303,10 +313,55 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   const pageNext = pageTo(1);
   const position = isSong ? (snap?.song ? { bar: snap.song.bar, beat: snap.song.beat, per: snap.song.beatsPerBar } : null) : snap?.clock ? { bar: snap.clock.bar, beat: snap.clock.beat, per: snap.clock.beatsPerBar } : null;
   const keyNow = isSong ? (snap?.song ? views[snap.song.idx]?.key : views[0]?.key) : snap?.pad ? KEY_NAMES[snap.pad.tonic] : null;
+  const fadeSwitch = (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={prefs.fadePause}
+      title={`Pause fades out over ${PAUSE_FADE.out} bars, and Resume fades back in over ${PAUSE_FADE.in}.`}
+      className="flex items-center gap-2 py-2 text-sm text-muted hover:text-ink"
+      onClick={() => savePrefs({ fadePause: !prefs.fadePause })}
+    >
+      <span className={`relative h-5 w-9 rounded-full transition-colors ${prefs.fadePause ? 'bg-accent shadow-glow-sm' : 'bg-edge/60'}`}>
+        <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-cream shadow transition-transform ${prefs.fadePause ? 'translate-x-4' : ''}`} />
+      </span>
+      Fade
+    </button>
+  );
+  /* The logo's sound bars, lit on each beat. Beat 1 stands tallest. */
+  const beatBars = (
+    <div className="flex items-center gap-1.5" aria-hidden>
+      {Array.from({ length: position?.per ?? 4 }, (_, i) => (
+        <span key={i} className={`w-2 rounded-full ${i === 0 ? 'h-7' : 'h-5'} ${position?.beat === i + 1 ? 'bg-accent shadow-glow-sm' : 'bg-edge/50'}`} />
+      ))}
+    </div>
+  );
+  const exit = () => go({ page: 'sets', id: set.id });
+  const bar = (on = false) =>
+    `flex min-h-14 items-center justify-center gap-2 rounded-2xl border px-3 text-lg font-semibold disabled:opacity-40 ${on ? 'border-accent bg-accent-soft text-amber' : 'border-edge bg-panel'}`;
 
   return (
     <div className="flex min-h-full flex-col">
-      {/* In the Mac app the window's traffic lights sit at the header's left end, and the header drags the window. */}
+      {ios ? (
+        // A stray touch must not end a song, so Stop takes a long press once the set is playing.
+        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-page/95 pb-2 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pt-[calc(0.5rem_+_env(safe-area-inset-top))] backdrop-blur">
+          {finished || (!started && isSong) ? (
+            <button type="button" className="rounded-full border border-line px-4 py-2" onClick={exit}>
+              Exit
+            </button>
+          ) : (
+            <HoldButton className="rounded-full border border-danger/60 px-4 py-2 font-semibold text-danger" onConfirm={exit}>
+              Hold to stop
+            </HoldButton>
+          )}
+          <p className="tabular ml-auto text-2xl font-bold" aria-label="Position">
+            {position && position.bar > 0 ? position.bar : '—'} · {position?.beat ?? '—'}
+          </p>
+          {beatBars}
+          <ThemeToggle />
+        </header>
+      ) : (
+      /* In the Mac app the window's traffic lights sit at the header's left end, and the header drags the window. */
       <header data-tauri-drag-region className="flex items-center gap-4 border-b border-line px-6 py-3 [.desktop_&]:pl-24">
         <button
           type="button"
@@ -332,30 +387,13 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
                 {snap?.paused ? <Play className="h-4 w-4 fill-current" /> : <Pause className="h-4 w-4 fill-current" />}
                 {snap?.paused ? 'Resume' : 'Pause'}
               </button>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={prefs.fadePause}
-                title={`Pause fades out over ${PAUSE_FADE.out} bars, and Resume fades back in over ${PAUSE_FADE.in}.`}
-                className="flex items-center gap-2 py-2 text-sm text-muted hover:text-ink"
-                onClick={() => savePrefs({ fadePause: !prefs.fadePause })}
-              >
-                <span className={`relative h-5 w-9 rounded-full transition-colors ${prefs.fadePause ? 'bg-accent shadow-glow-sm' : 'bg-edge/60'}`}>
-                  <span className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-cream shadow transition-transform ${prefs.fadePause ? 'translate-x-4' : ''}`} />
-                </span>
-                Fade
-              </button>
+              {fadeSwitch}
             </div>
           )}
           <p className="tabular text-3xl font-bold" aria-label="Position">
             Bar {position && position.bar > 0 ? position.bar : '—'} · {position?.beat ?? '—'}
           </p>
-          {/* The logo's sound bars, lit on each beat. Beat 1 stands tallest. */}
-          <div className="flex items-center gap-1.5" aria-hidden>
-            {Array.from({ length: position?.per ?? 4 }, (_, i) => (
-              <span key={i} className={`w-2 rounded-full ${i === 0 ? 'h-7' : 'h-5'} ${position?.beat === i + 1 ? 'bg-accent shadow-glow-sm' : 'bg-edge/50'}`} />
-            ))}
-          </div>
+          {beatBars}
           {isSong && (
             <>
               <Stat label="Key" value={keyNow ?? '—'} />
@@ -364,10 +402,12 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
           )}
         </div>
       </header>
+      )}
 
-      <div className="grid flex-1 grid-cols-[200px_minmax(0,1fr)_290px] max-lg:grid-cols-[minmax(0,1fr)_260px]">
+      {/* iPhone: one column above the fixed bar. Landscape and iPad keep side-by-side columns, clear of the notch. */}
+      <div className="grid flex-1 grid-cols-[200px_minmax(0,1fr)_290px] max-lg:grid-cols-[minmax(0,1fr)_260px] ios:pb-[calc(6rem_+_env(safe-area-inset-bottom))] ios:pl-[env(safe-area-inset-left)] ios:pr-[env(safe-area-inset-right)] ios:max-md:grid-cols-1">
         <SetList set={set} items={items} current={current} viewing={viewing} onView={show} />
-        <main className="border-x border-line px-6 py-6 max-lg:border-l-0">
+        <main className="border-x border-line px-6 py-6 max-lg:border-l-0 ios:max-md:border-x-0 ios:max-md:px-4">
           <Pager
             label={viewing !== null ? `Song ${viewing + 1} of ${items.length}` : finished ? 'End of the set' : isSong ? `Song ${songIndex + 1} of ${items.length}` : `Pad after song ${songIndex + 1}`}
             prev={pagePrev === null ? undefined : items[pagePrev]}
@@ -395,8 +435,9 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
           ) : left ? (
             <PadPanel left={left} next={next} snap={snap} mode={prefs.mode} onMode={mode => savePrefs({ mode })} onPad={pickPad} onPadOff={padMoves.off} way={way} picked={wayIn(set, left, next).picked} opener={firstPad(left, next)} step={walkStep.current} have={have} />
           ) : null}
+          {ios && !finished && <div className="mt-4">{fadeSwitch}</div>}
         </main>
-        <aside className="px-5 py-6 max-lg:col-span-2 max-lg:border-t max-lg:border-line">
+        <aside className="px-5 py-6 max-lg:col-span-2 max-lg:border-t max-lg:border-line ios:max-lg:col-span-1 ios:max-md:px-4 ios:md:border-t-0">
           {finished ? null : isSong && song ? (
             <OnDeck
               song={song}
@@ -433,6 +474,28 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
           ) : null}
         </aside>
       </div>
+
+      {ios && !finished && (
+        // Hold, Cancel and Pause stay under the thumb, spaced apart so one press never lands on its neighbour.
+        <div className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 gap-4 border-t border-line bg-page/95 pb-[calc(0.75rem_+_env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pt-3 backdrop-blur">
+          <button type="button" aria-pressed={Boolean(snap?.song?.hold)} disabled={!isSong || !snap?.song} className={bar(snap?.song?.hold)} onClick={() => session?.toggleHold()}>
+            {snap?.song?.hold ? 'Let go' : 'Hold'}
+          </button>
+          <button type="button" disabled={snap?.song?.next?.reason !== 'pick'} className={bar()} onClick={() => session?.cancel()}>
+            Cancel
+          </button>
+          {lastItem ? (
+            <HoldButton className={bar()} onConfirm={fadeOutEnd}>
+              End set
+            </HoldButton>
+          ) : (
+            <button type="button" disabled={isSong && !started} className={bar(snap?.paused)} onClick={togglePause}>
+              {snap?.paused ? <Play className="h-5 w-5 fill-current" /> : <Pause className="h-5 w-5 fill-current" />}
+              {snap?.paused ? 'Resume' : 'Pause'}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -538,7 +601,7 @@ function BrowseSong(props: { song: Song; ready: boolean; arriving: string | null
 
 function SectionTiles({ views, playing, queued, disabled, onPick }: { views: SectionView[]; playing?: number; queued?: number; disabled: boolean; onPick: (index: number) => void }) {
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3 ios:grid-cols-2">
       {views.map((view, i) => {
         const isPlaying = playing === i;
         const isQueued = queued === i && !isPlaying;
@@ -580,14 +643,25 @@ function SongPads(props: { song: Song; snap: Snapshot['song']; started: boolean;
   return (
     <div>
       <div className="mb-5 flex flex-wrap items-baseline justify-between gap-3">
-        <h1 className="text-4xl font-extrabold tracking-tight">{song.title}</h1>
-        {snap && current && (
+        <h1 className="text-4xl font-extrabold tracking-tight ios:max-md:text-2xl">{song.title}</h1>
+        {!ios && snap && current && (
           <p className="text-[17px]" aria-live="polite">
             Now: <b>{current.name}</b>
             {snap.hold ? ' · holding' : ` · pass ${snap.pass} of ${snap.repeats} · ${snap.barsLeft} bars left`}
           </p>
         )}
       </div>
+      {ios && snap && current && (
+        // The section playing, big enough to read at arm's length in a dim room.
+        <div className="mb-5 rounded-2xl border border-accent/50 bg-accent/[0.07] px-4 py-3" aria-live="polite">
+          <p className="caps text-muted">Now</p>
+          <p className="text-5xl font-black leading-tight tracking-tight text-amber [text-shadow:0_0_28px_rgb(var(--accent)/var(--glow))]">{current.name}</p>
+          <p className="tabular mt-1 text-lg">
+            {snap.hold ? 'Holding' : `Pass ${snap.pass} of ${snap.repeats} · ${snap.barsLeft} bars left`}
+            {current.key ? ` · ${current.key}` : ''}
+          </p>
+        </div>
+      )}
       {!started && (
         <div className="mb-5 flex flex-wrap items-center gap-4">
           <button type="button" disabled={!ready} className="flex items-center gap-2 rounded-full bg-accent px-7 py-4 text-lg font-semibold text-navy shadow-glow-sm hover:bg-accent-hover disabled:opacity-50" onClick={() => onStart(0)}>
@@ -609,14 +683,14 @@ function SongPads(props: { song: Song; snap: Snapshot['song']; started: boolean;
                   ? 'Last section. The song ends after this pass.'
                   : ''}
           </p>
-          {next?.reason === 'pick' && (
+          {!ios && next?.reason === 'pick' && (
             <button type="button" className="rounded-full border border-line px-4 py-2 hover:bg-raised" onClick={() => session?.cancel()}>
               Cancel
             </button>
           )}
         </div>
       )}
-      {snap && (
+      {!ios && snap && (
         <button
           type="button"
           aria-pressed={snap.hold}
@@ -758,9 +832,15 @@ function OnDeck(props: {
       </button>
       {open && (
         <div className="mt-2 space-y-2">
-          <button type="button" disabled={!started || snap?.song?.forced} className="w-full rounded-full border border-line px-4 py-2.5 text-left hover:bg-panel disabled:opacity-50" onClick={() => session?.endSong(2)}>
-            End song now (fade over 2 bars)
-          </button>
+          {ios ? (
+            <HoldButton disabled={!started || snap?.song?.forced} className="w-full rounded-full border border-line px-4 py-2.5 disabled:opacity-50" onConfirm={() => session?.endSong(2)}>
+              Hold to end the song (fades over 2 bars)
+            </HoldButton>
+          ) : (
+            <button type="button" disabled={!started || snap?.song?.forced} className="w-full rounded-full border border-line px-4 py-2.5 text-left hover:bg-panel disabled:opacity-50" onClick={() => session?.endSong(2)}>
+              End song now (fade over 2 bars)
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -820,7 +900,7 @@ function PadPanel(props: {
     tonics.length > 0 && (
       <div key={title}>
         <p className="mb-2 mt-4 text-sm text-muted">{title}</p>
-        <div className={`grid gap-3 ${tonics.length <= 2 ? 'grid-cols-2' : 'grid-cols-[repeat(auto-fill,minmax(150px,1fr))]'}`}>{tonics.map(tonic => tile(tonic, tonics.length <= 2))}</div>
+        <div className={`grid gap-3 ${tonics.length <= 2 ? 'grid-cols-2' : 'grid-cols-[repeat(auto-fill,minmax(150px,1fr))]'} ios:grid-cols-2`}>{tonics.map(tonic => tile(tonic, tonics.length <= 2))}</div>
       </div>
     );
   // The way in, then every pad of the modulation guide's ways into the next key. Advanced keeps the shared-chord pads.
@@ -829,7 +909,7 @@ function PadPanel(props: {
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex rounded-full border border-line p-1" role="radiogroup" aria-label="Pad view">
+        <div className="flex rounded-full border border-line p-1 ios:max-md:grid ios:max-md:w-full ios:max-md:grid-cols-3" role="radiogroup" aria-label="Pad view">
           {(
             [
               ['simple', 'Simple', 'app plays it'],
@@ -842,7 +922,7 @@ function PadPanel(props: {
               type="button"
               role="radio"
               aria-checked={mode === value}
-              className={`rounded-full px-5 py-1.5 text-left ${mode === value ? 'bg-accent-soft text-amber ring-1 ring-inset ring-accent/50' : 'text-muted hover:text-ink'}`}
+              className={`rounded-full px-5 py-1.5 text-left ios:max-md:px-3 ${mode === value ? 'bg-accent-soft text-amber ring-1 ring-inset ring-accent/50' : 'text-muted hover:text-ink'}`}
               onClick={() => onMode(value)}
             >
               <span className="block font-semibold">{title}</span>
