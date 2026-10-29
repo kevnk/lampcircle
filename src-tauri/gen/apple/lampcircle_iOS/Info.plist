@@ -11,16 +11,16 @@
 			<array>
 				<string>djw</string>
 			</array>
-			<key>LSItemContentTypes</key>
-			<array>
-				<string>app.truefrontier.lampcircle.djw</string>
-			</array>
 			<key>CFBundleTypeName</key>
 			<string>Lamp Circle Song Map</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
 			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>app.truefrontier.lampcircle.djw</string>
+			</array>
 		</dict>
 	</array>
 	<key>CFBundleExecutable</key>
@@ -36,7 +36,7 @@
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
@@ -82,15 +82,17 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>UISupportsDocumentBrowser</key>
+	<true/>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
-			<key>UTTypeIdentifier</key>
-			<string>app.truefrontier.lampcircle.djw</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.yaml</string>
 			</array>
+			<key>UTTypeIdentifier</key>
+			<string>app.truefrontier.lampcircle.djw</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
