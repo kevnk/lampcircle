@@ -276,6 +276,95 @@ same('djw round trip ones', back.taps.filter(x => x.one).length, map.songGrid(s)
 const v1 = djw.parseDjw(readFileSync(new URL('../way-maker.sample.djw', import.meta.url), 'utf8'));
 same('djw v1 title', v1.title, 'Way Maker');
 same('djw v1 parts become sections', v1.sections.slice(0, 2).map(x => [x.type, x.at, x.pickupBeats]), [['intro', 3.2, 0], ['verse', 17.33, 1]]);
+same('a map without lyrics writes no lyrics keys', /\blyrics:|slide_bars/.test(text), false);
+// A map opened from a .djw, the way importSong builds it, minus the audio.
+const opened = (m: import('../src/lib/djw.ts').DjwMap, duration = 30) =>
+  ({
+    ...{ id: 'w', title: m.title, artist: m.artist, duration, source: m.source, peaks: [], chroma: [], beatsPerBar: m.beatsPerBar, taps: m.taps, fill: false },
+    ...{ sections: m.sections.map((x, i) => ({ id: `w${i}`, ...x })), lyrics: m.lyrics, marksEnd: m.marksEnd ?? duration, refined: true, updatedAt: 0, addedAt: 0 },
+  }) as import('../src/types.ts').Song;
+const meaning = (x: import('../src/types.ts').Song) => [
+  [x.title, x.artist, x.source, map.songGrid(x).beats.map(r3)],
+  map.sectionViews(x).map(v => [v.name, v.s, v.e, v.section.pickupBeats, v.section.fadeInBeats, v.section.fadeOutBeats, v.section.repeats, v.section.jumpAt]),
+];
+const sampleSong = opened(v1);
+const sampleText = djw.serializeDjw(sampleSong, { includeAudioPath: false });
+same('the v1 sample exported and read back means the same', meaning(opened(djw.parseDjw(sampleText))), meaning(sampleSong));
+same('and exports the same again', djw.serializeDjw(opened(djw.parseDjw(sampleText)), { includeAudioPath: false }), sampleText);
+same('the v1 sample writes no lyrics keys', /\blyrics:|slide_bars/.test(sampleText), false);
+
+// Lyrics round trip: slides of several lines, a deliberate blank, a chorus shared by two sections. Placeholder words.
+const words = {
+  source: 'lrclib:5170474',
+  offset: -0.25,
+  leadBeats: 1.5,
+  fadeBeats: 1,
+  blocks: {
+    'verse-1': [['First line', 'second line'], ['Third line: with # marks', '- and a dash']],
+    chorus: [['Chorus one', 'chorus two'], [], ['Chorus three']],
+    bridge: [['Bridge line']],
+  },
+};
+const lyricFor: Record<string, import('../src/types.ts').SectionLyric> = {
+  'Verse 1': { block: 'verse-1', slideBars: [0, 2] },
+  Chorus: { block: 'chorus', slideBars: [0, 1, 3] },
+  Bridge: { block: 'bridge', slideBars: [0] },
+  Outro: { block: 'chorus', slideBars: [0, 2, 3] },
+};
+const sung = { ...s, lyrics: words, sections: map.sectionViews(s).map(v => (lyricFor[v.name] ? { ...v.section, lyric: lyricFor[v.name] } : v.section)) };
+const sungText = djw.serializeDjw(sung, { includeAudioPath: false });
+const sungWarnings: string[] = [];
+const sungBack = djw.parseDjw(sungText, sungWarnings);
+same('lyrics survive export and import', sungBack.lyrics, words);
+same('so does the block and slide bars of each section', sungBack.sections.map(x => x.lyric ?? null), map.sectionViews(sung).map(v => v.section.lyric ?? null));
+same('and reading them back warns of nothing', sungWarnings, []);
+same('blocks are written as literal text, a blank line between slides', sungText.includes('    chorus: |\n      Chorus one\n      chorus two\n\n      -\n\n      Chorus three\n'), true);
+same('slide bars are written on one line', sungText.includes('    lyrics: chorus\n    slide_bars: [ 0, 1, 3 ]\n'), true);
+const again = djw.parseDjw(djw.serializeDjw(opened(sungBack, s.duration), { includeAudioPath: false }));
+same('a second export and import keeps them too', [again.lyrics, again.sections.map(x => x.lyric ?? null)], [words, sungBack.sections.map(x => x.lyric ?? null)]);
+
+// Bad lyrics never stop a map from opening. What can't be used is left out or clamped, with a warning.
+// The Verse's end_bar says 3, but the Chorus starts on bar 5, and that is where the app ends the Verse.
+const badMap = (lyrics: string, verse = '', chorus = '') => `djw: 2
+song: { title: Bad Lyrics, meter: 4/4 }
+grid:
+  beats: [${Array.from({ length: 32 }, (_, i) => i / 2).join(', ')}]
+  downbeats: [0, 2, 4, 6, 8, 10, 12, 14]
+${lyrics}
+sections:
+  - { name: Verse, type: verse, start_bar: 1, end_bar: 3, pickup_beats: 0, fade_in: 1, fade_out: 1, repeats: 1, jump_at: bar${verse} }
+  - { name: Chorus, type: chorus, start_bar: 5, end_bar: 9, pickup_beats: 0, fade_in: 1, fade_out: 1, repeats: 1, jump_at: bar${chorus} }
+`;
+const openBad = (text: string) => {
+  const warnings: string[] = [];
+  const m = djw.parseDjw(text, warnings);
+  return { sections: m.sections.map(x => [x.type, x.at, x.lyric ?? null]), lyrics: m.lyrics ?? null, warnings };
+};
+same('lyrics that are a number are left out', openBad(badMap('lyrics: 5', '', ', lyrics: chorus, slide_bars: [0]')), {
+  sections: [['verse', 0, null], ['chorus', 8, null]],
+  lyrics: null,
+  warnings: ['The lyrics in this file could not be read, so they were left out.', 'Chorus shows lyrics "chorus", which this file does not have, so it stays blank.'],
+});
+same('blocks as a list are left out and lead_beats is clamped', openBad(badMap('lyrics:\n  lead_beats: 100\n  blocks: [a, b]')), {
+  sections: [['verse', 0, null], ['chorus', 8, null]],
+  lyrics: { leadBeats: 8, blocks: {} },
+  warnings: ['lyrics.blocks is not a set of named blocks, so it was left out.', 'lyrics.lead_beats 100 became 8.'],
+});
+const badBlocks = 'lyrics:\n  source: 7\n  fade_beats: 1.2\n  blocks:\n    verse: |\n      One\n      two\n\n      Three\n\n\n      Four\n    empty: ""\n    number: 12';
+same('bad blocks and slide bars are dropped or clamped, a missing block shows blank', openBad(badMap(badBlocks, ', lyrics: verse, slide_bars: ["x", -3, 99, 2, 2]', ', lyrics: verse, slide_bars: [0, 1, 2, 3]')), {
+  sections: [['verse', 0, { block: 'verse', slideBars: [0, 2, 3] }], ['chorus', 8, { block: 'verse', slideBars: [0, 1, 2] }]],
+  lyrics: { fadeBeats: 1, blocks: { verse: [['One', 'two'], ['Three'], ['Four']] } },
+  warnings: [
+    'Lyrics block "empty" has no words to show, so it was left out.',
+    'Lyrics block "number" has no words to show, so it was left out.',
+    'lyrics.source could not be read, so it was left out.',
+    'lyrics.fade_beats 1.2 became 1.',
+    'Verse slide_bars ["x",-3,99,2,2] became [0,2,3].',
+    'Chorus slide_bars [0,1,2,3] became [0,1,2].',
+  ],
+});
+same('a section pointing to a missing block shows blank', openBad(badMap(badBlocks, ', lyrics: nope')).sections[0], ['verse', 0, null]);
+same('slide bars that loop back on themselves still open', openBad(badMap(badBlocks, ', lyrics: verse, slide_bars: &x [*x]', ', lyrics: &y [*y]')).sections, [['verse', 0, { block: 'verse', slideBars: [0] }], ['chorus', 8, null]]);
 
 // Library file round trip.
 const backup = await import('../src/lib/backup.ts');
@@ -354,6 +443,537 @@ shown = [];
 const tooLate = perform([[6, session => session.toggleHold()], [0.3, session => (session.toggleHold(), look(session), session.toggleHold(), look(session))], [-0.1, look]]);
 same('once the Verse is fading out under the loop, it plays once more and then moves on', tooLate, ['1.1', '1.2', '2.1']);
 same('Hold stays lit until that loop lands, a second press keeps it letting go, then it shows off', shown, [true, true, false]);
+
+// Finding lyrics: caption and LRC parsers, clean-up, LRCLIB, and the order sources are tried in. Words are made up.
+const lyr = await import('../src/lib/lyricsFetch.ts');
+const timed = (lines: Array<{ start: number; end: number; text: string; kind: string }>) => lines.map(line => [r3(line.start), r3(line.end), line.text, line.kind]);
+const json3 = (events: unknown[]) => JSON.stringify({ wireMagic: 'pb3', events });
+const autoJson3 = json3([
+  { tStartMs: 0, dDurationMs: 484210, id: 1 },
+  { tStartMs: 440, dDurationMs: 6930, segs: [{ utf8: '[Music]' }] },
+  { tStartMs: 4090, dDurationMs: 3280, aAppend: 1, segs: [{ utf8: '\n' }] },
+  { tStartMs: 19800, dDurationMs: 12759, segs: [{ utf8: 'shine' }, { utf8: ' a', tOffsetMs: 840 }, { utf8: ' light', tOffsetMs: 920 }] },
+  { tStartMs: 24000, dDurationMs: 9000, segs: [{ utf8: '♪ ' }, { utf8: 'on', tOffsetMs: 500 }, { utf8: ' the hill', tOffsetMs: 900 }] },
+  { tStartMs: 30000, dDurationMs: 2000, segs: [{ utf8: '  ' }] },
+  { tStartMs: 31000, dDurationMs: 6000, segs: [{ utf8: 'on the hill' }] },
+]);
+same('json3: [Music], newline and blank events are skipped, a line runs until the next starts', timed(lyr.parseJson3(autoJson3, 'auto')), [
+  [19.8, 24, 'shine a light', 'auto'],
+  [24.5, 30, 'on the hill', 'auto'],
+  [31, 37, 'on the hill', 'auto'],
+]);
+const autoVtt = [
+  'WEBVTT', 'Kind: captions', 'Language: en', '', 'NOTE made up words', '', 'STYLE', '::cue { color: white }', '',
+  '00:00:01.000 --> 00:00:04.000 align:start position:0%', ' ', 'shine<00:00:01.500><c> a</c><00:00:02.000><c> light</c>', '',
+  '00:00:04.000 --> 00:00:04.010 align:start position:0%', 'shine a light', ' ', '',
+  '00:00:04.010 --> 00:00:07.000 align:start position:0%', 'shine a light', 'on<00:00:05.000><c> the</c><00:00:05.500><c> hill</c>', '',
+  '00:00:07.000 --> 00:00:07.010 align:start position:0%', 'on the hill', ' ', '',
+  '00:00:07.010 --> 00:00:09.000 align:start position:0%', 'on the hill', 'on<00:00:07.500><c> the</c><00:00:08.000><c> hill</c>', '',
+  '01:02.000 --> 01:04.500', '[Music] bread &amp; wine', '',
+  '01:10.000 --> 01:12.000', 'bread &amp; wine', '',
+].join('\n');
+same('vtt: word tags out, rolling repeats once, a line sung twice kept twice, also after a gap, mm:ss cues', timed(lyr.parseVtt(autoVtt, 'auto')), [
+  [1, 4, 'shine a light', 'auto'],
+  [4.01, 7, 'on the hill', 'auto'],
+  [7.01, 9, 'on the hill', 'auto'],
+  [62, 64.5, 'bread & wine', 'auto'],
+  [70, 72, 'bread & wine', 'auto'],
+]);
+const manualVtt = 'WEBVTT\n\n1\n00:00:20.000 --> 00:00:30.000\nLine one here\nline two here\n\n2\n00:00:30,000 --> 00:00:39,500 line:90%\n<i>Third</i> line\n';
+same('vtt: a manual cue is one line, SRT commas read too', timed(lyr.parseVtt(manualVtt, 'manual')), [
+  [20, 30, 'Line one here line two here', 'manual'],
+  [30, 39.5, 'Third line', 'manual'],
+]);
+const lrc = '[ar:Made Up Band]\n[ti:Made Up Song]\n[offset:+500]\n[00:12.00]Shine a light\n[00:15.50][01:10.00]On the hill\n[00:20.00]\n[00:21.00]<00:21.00>Word <00:21.50>by word\n';
+same('lrc: tags skipped, offset applied, one line at two times, gaps end lines, last runs to the song end', timed(lyr.parseLrc(lrc, 72)), [
+  [11.5, 15, 'Shine a light', 'lrc'],
+  [15, 19.5, 'On the hill', 'lrc'],
+  [20.5, 28.5, 'Word by word', 'lrc'],
+  [69.5, 72, 'On the hill', 'lrc'],
+]);
+same('lrc: without the song length the last line lasts 5 s', timed(lyr.parseLrc(lrc)).at(-1), [69.5, 74.5, 'On the hill', 'lrc']);
+same('lrc: a line ends by the song end', timed(lyr.parseLrc('[00:09.00]a\n[00:12.00]b', 10)), [[9, 10, 'a', 'lrc'], [12, 17, 'b', 'lrc']]);
+const rolling = [
+  { start: 0, end: 3, text: '[Music]', kind: 'auto' },
+  { start: 3, end: 6, text: '♪ shine a light ♪', kind: 'auto' },
+  { start: 5, end: 8, text: 'shine a light', kind: 'auto' },
+  { start: 7, end: 10, text: 'shine a light on', kind: 'auto' },
+  { start: 9.5, end: 12, text: 'shine a  light on the hill', kind: 'auto' },
+  { start: 12.5, end: 14, text: 'shine a light', kind: 'auto' },
+] as const;
+same('clean-up: [Music] and ♪ out, an overlapping repeat or a line growing word by word is one line', timed(lyr.cleanLines(rolling.map(line => ({ ...line })))), [
+  [3, 12, 'shine a light on the hill', 'auto'],
+  [12.5, 14, 'shine a light', 'auto'],
+]);
+
+/** A stand-in for fetch: answers by LRCLIB path, and remembers what was asked. */
+function fakeLrclib(answer: (path: string, url: URL) => Response | Promise<Response>) {
+  const calls: Array<{ path: string; params: Record<string, string>; client: string | null }> = [];
+  const fetchFn = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    const path = url.pathname.replace('/api', '');
+    calls.push({ path, params: Object.fromEntries(url.searchParams), client: new Headers(init?.headers).get('Lrclib-Client') });
+    return answer(path, url);
+  }) as typeof fetch;
+  return { fetchFn, calls };
+}
+const jsonResponse = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers });
+const record = (id: number, duration: number, more = {}) => ({
+  ...{ id, trackName: 'Made Up Song', artistName: 'Made Up Band', duration, instrumental: false, plainLyrics: 'Shine a light' },
+  ...{ syncedLyrics: '[00:01.00]Shine a light\n[00:04.00]On the hill' },
+  ...more,
+});
+const lookup = { title: 'Made Up Song', artist: 'Made Up Band', duration: 198.1 };
+const summary = (found: Awaited<ReturnType<typeof lyr.findLyrics>>) => (found ? [found.source, found.kind, found.lines.length, found.note ?? null] : null);
+
+let lrclib = fakeLrclib(() => jsonResponse(record(7, 198)));
+same('LRCLIB: a duration match from get', summary(await lyr.lrclibLyrics(lookup, lrclib.fetchFn)), ['lrclib:7', 'lrc', 2, null]);
+same('and it asks with the rounded length, naming the app', [lrclib.calls[0].path, lrclib.calls[0].params.duration, /^LampCircle\/\S+ \(https:\/\/github\.com\/kevnk\/lampcircle\)$/.test(lrclib.calls[0].client ?? '')], ['/get', '198', true]);
+lrclib = fakeLrclib(path =>
+  path === '/get'
+    ? jsonResponse({ code: 404, name: 'TrackNotFound' }, 404)
+    : jsonResponse([record(1, 198, { syncedLyrics: null }), record(2, 198, { instrumental: true, syncedLyrics: '' }), record(3, 240), record(4, 199.5)]),
+);
+same('LRCLIB: a get miss searches, and takes the synced record closest in length', summary(await lyr.lrclibLyrics(lookup, lrclib.fetchFn)), ['lrclib:4', 'lrc', 2, null]);
+lrclib = fakeLrclib((path, url) => (path === '/search' && !url.searchParams.has('artist_name') ? jsonResponse([record(5, 260)]) : jsonResponse(path === '/get' ? { code: 404 } : [], path === '/get' ? 404 : 200)));
+const far = await lyr.lrclibLyrics(lookup, lrclib.fetchFn);
+same('LRCLIB: then by title alone, and a record far in length says so', [summary(far)?.slice(0, 3), /61\.9 s off/.test(far?.note ?? ''), lrclib.calls.map(call => call.path)], [['lrclib:5', 'lrc', 2], true, ['/get', '/search', '/search']]);
+lrclib = fakeLrclib(() => jsonResponse(record(9, 98)));
+same('LRCLIB: a get answer over 2 s off says so too', summary(await lyr.lrclibLyrics({ ...lookup, duration: 100.49 }, lrclib.fetchFn))?.[3], "LRCLIB's closest synced lyrics are 2.5 s off this recording's length, so the times may not fit.");
+lrclib = fakeLrclib(() => jsonResponse({ message: 'slow down' }, 429, { 'Retry-After': '120' }));
+same('LRCLIB: a long 429 is a miss, with no retries', [await lyr.lrclibLyrics(lookup, lrclib.fetchFn), lrclib.calls.length], [null, 3]);
+let tries = 0;
+lrclib = fakeLrclib(() => (tries++ ? jsonResponse(record(8, 198)) : jsonResponse({}, 429, { 'Retry-After': '0' })));
+same('LRCLIB: a short 429 is tried once more', [summary(await lyr.lrclibLyrics(lookup, lrclib.fetchFn)), lrclib.calls.length], [['lrclib:8', 'lrc', 2, null], 2]);
+lrclib = fakeLrclib(path => (path === '/get' ? Promise.reject(new TypeError('offline')) : new Response('<html>', { status: 200 })));
+same('LRCLIB: no network or a page that is not JSON is a miss', await lyr.lrclibLyrics(lookup, lrclib.fetchFn), null);
+same('a title is looked up without the video extras', [
+  lyr.songQuery({ title: 'Housefires - Good Good Father ⧸⧸ feat. Pat Barrett (Official Music Video)', artist: '' }),
+  lyr.songQuery({ title: 'Good Good Father ⧸⧸ feat. Pat Barrett', artist: 'Housefires' }),
+  lyr.songQuery({ title: 'Way Maker Official Live Video', artist: 'Leeland VEVO' }),
+  lyr.songQuery({ title: 'Made Up Song | Made Up Band', artist: '' }),
+], [
+  { title: 'Good Good Father', artist: 'Housefires' },
+  { title: 'Good Good Father', artist: 'Housefires' },
+  { title: 'Way Maker', artist: 'Leeland' },
+  { title: 'Made Up Song', artist: 'Made Up Band' },
+]);
+
+const tube = { ...(s as object), ...lookup, source: 'https://www.youtube.com/watch?v=abcdefghijk' } as never;
+const manualTrack = { kind: 'manual', lang: 'en', ext: 'json3', text: json3([{ tStartMs: 20000, dDurationMs: 10000, segs: [{ utf8: 'Shine a light on the hill' }] }]) } as const;
+const autoTrack = { kind: 'auto', lang: 'en-orig', ext: 'vtt', text: autoVtt } as const;
+const lrclibHit = () => fakeLrclib(() => jsonResponse(record(7, 198))).fetchFn;
+const lrclibMiss = () => fakeLrclib(path => jsonResponse(path === '/get' ? { code: 404 } : [], path === '/get' ? 404 : 200)).fetchFn;
+const lrclibFar = () => fakeLrclib(path => jsonResponse(path === '/get' ? { code: 404 } : [record(5, 260)], path === '/get' ? 404 : 200)).fetchFn;
+const tracks = (...list: unknown[]) => async () => list as never;
+same('order: manual captions win over LRCLIB', summary(await lyr.findLyrics(tube, { captions: tracks(autoTrack, manualTrack), fetch: lrclibHit() })), ['youtube-subs', 'manual', 1, null]);
+same('order: LRCLIB wins over auto captions', summary(await lyr.findLyrics(tube, { captions: tracks(autoTrack), fetch: lrclibHit() })), ['lrclib:7', 'lrc', 2, null]);
+same('order: auto captions when LRCLIB misses, flagged to check', summary(await lyr.findLyrics(tube, { captions: tracks(autoTrack), fetch: lrclibMiss() })), [
+  'youtube-auto', 'auto', 5, 'These are YouTube auto captions, so check the words.',
+]);
+same('order: auto captions win over an LRCLIB record far in length', summary(await lyr.findLyrics(tube, { captions: tracks(autoTrack), fetch: lrclibFar() }))?.[0], 'youtube-auto');
+same('order: a far LRCLIB record when there are no captions, with its note', summary(await lyr.findLyrics(tube, { captions: tracks(), fetch: lrclibFar() }))?.slice(0, 2), ['lrclib:5', 'lrc']);
+same('order: nothing anywhere is null', await lyr.findLyrics(tube, { captions: tracks(), fetch: lrclibMiss() }), null);
+same('order: captions failing still tries LRCLIB', summary(await lyr.findLyrics(tube, { captions: async () => Promise.reject(new Error('no yt-dlp')), fetch: lrclibHit() }))?.[0], 'lrclib:7');
+let asked = false;
+const local = { ...(tube as object), source: 'https://soundcloud.com/x/y' } as never;
+same('order: a song not from YouTube goes straight to LRCLIB', [summary(await lyr.findLyrics(local, { captions: async () => ((asked = true), [manualTrack]), fetch: lrclibHit() }))?.[0], asked], ['lrclib:7', false]);
+
+// Found lyrics keep their source on the song. Until they're placed there are no blocks, and the .djw stays clean.
+const sourced = lyr.withFoundLyrics(s, (await lyr.findLyrics(tube, { captions: tracks(), fetch: lrclibHit() }))!);
+same('the song keeps the source and the timed lines', [sourced.lyrics, sourced.timedLyrics?.length], [{ source: 'lrclib:7', blocks: {} }, 2]);
+const sourcedText = djw.serializeDjw(sourced, { includeAudioPath: false });
+const sourcedWarnings: string[] = [];
+same('a source with no blocks writes just the source, no timed lines', [sourcedText.includes('lyrics:\n  source: lrclib:7\nsections:'), /blocks|timed|Shine/.test(sourcedText)], [true, false]);
+same('and reads back the same, with no warnings', [djw.parseDjw(sourcedText, sourcedWarnings).lyrics, sourcedWarnings], [{ source: 'lrclib:7', blocks: {} }, []]);
+
+// Placing lyrics on bars: clean-up, sections, slides, blocks and the offset. 120 BPM in 4/4, so bar n (from 0)
+// starts at 2n s and each beat is 0.5 s. Words are made up.
+const place = await import('../src/lib/lyricsPlace.ts');
+type Line = import('../src/types.ts').TimedLine;
+type PlacedSong = import('../src/types.ts').Song;
+const at = (bar: number, beat = 1) => bar * 2 + (beat - 1) * 0.5;
+/** Sections as [type, first bar, pickup beats], marked up to `marksEnd` bars. */
+const barSong = (sections: Array<[string, number, number?]>, bars: number, marksEnd = bars) =>
+  ({
+    ...{ id: 'bars', title: 'Made Up Song', artist: 'Made Up Band', duration: bars * 2, peaks: [], chroma: [], beatsPerBar: 4, fill: false },
+    taps: Array.from({ length: bars * 4 }, (_, i) => ({ t: i * 0.5, one: i % 4 === 0 })),
+    sections: sections.map(([type, bar, pickupBeats = 1], i) => ({ id: `s${i}`, type, at: at(bar), pickupBeats, fadeInBeats: 1, fadeOutBeats: 1, repeats: 1, jumpAt: 'phrase' })),
+    ...{ marksEnd: at(marksEnd), refined: true, updatedAt: 0, addedAt: 0 },
+  }) as PlacedSong;
+const line = (start: number, end: number, text: string, kind: Line['kind'] = 'lrc'): Line => ({ start, end, text, kind });
+/** A record keyed by section id, keyed by section name instead. */
+const byName = <T>(song: PlacedSong, record: Record<string, T>) =>
+  Object.fromEntries(map.sectionViews(song).filter(v => record[v.section.id]).map(v => [v.name, record[v.section.id]]));
+
+const twoSong = barSong([['verse', 0], ['chorus', 4]], 8);
+const twoGrid = map.songGrid(twoSong);
+const tidy = (lines: Line[]) => timed(place.tidyLines(lyr.cleanLines(lines), twoGrid, 4));
+same('clean-up: [Music] out, the same words starting within a beat are one line, a real repeat stays', tidy([
+  line(0.5, 2, '[Music]', 'manual'),
+  line(2, 4, 'Alpha beta gamma', 'manual'),
+  line(2.3, 4.5, 'alpha beta gamma!', 'manual'),
+  line(6, 8, 'Alpha beta gamma', 'manual'),
+]), [[2, 4.5, 'Alpha beta gamma', 'manual'], [6, 8, 'Alpha beta gamma', 'manual']]);
+const autoLines = [
+  line(2, 7, 'one two three four five six seven eight nine ten', 'auto'),
+  line(7.3, 8.3, 'eleven twelve', 'auto'),
+  line(8.4, 8.9, 'thirteen', 'auto'),
+];
+same('auto captions are rebuilt: a new line on a downbeat after 6 words, or at a half-beat gap, capitalized', tidy(autoLines), [
+  [2, 6, 'One two three four five six seven eight', 'auto'],
+  [6, 7, 'Nine ten', 'auto'],
+  [7.3, 8.9, 'Eleven twelve thirteen', 'auto'],
+]);
+same('a long line splits at a comma near the middle, else the middle word, its time split to match', tidy([
+  line(1, 6.1, 'Alpha beta gamma delta, epsilon zeta eta theta iota', 'manual'),
+  line(8, 13.6, 'Alpha beta gamma delta epsilon zeta eta theta iota kappa', 'manual'),
+]), [
+  [1, 3.3, 'Alpha beta gamma delta,', 'manual'],
+  [3.3, 6.1, 'epsilon zeta eta theta iota', 'manual'],
+  [8, 11, 'Alpha beta gamma delta epsilon', 'manual'],
+  [11, 13.6, 'zeta eta theta iota kappa', 'manual'],
+]);
+same('an LRC line lasts until the next starts, at most 2 bars; a caption keeps its end', [tidy([line(2, 10, 'Alpha'), line(12, 13, 'Beta')]), tidy([line(2, 10, 'Alpha', 'manual')])], [
+  [[2, 6, 'Alpha', 'lrc'], [12, 13, 'Beta', 'lrc']],
+  [[2, 10, 'Alpha', 'manual']],
+]);
+same('auto caption slides are marked to check, by section and slide', byName(twoSong, place.placeLyrics(twoSong, autoLines, { source: 'youtube-auto' }).checkWords), { Verse: [0], Chorus: [0] });
+
+/** Which sections a single line lands in. The Verse is bars 0-4, the Chorus bars 4-8 (8 s on), with a 1-beat pickup. */
+const home = (one: Line, options: Partial<import('../src/lib/lyricsPlace.ts').PlaceOptions> = {}) =>
+  Object.keys(byName(twoSong, place.placeLyrics(twoSong, [one], { source: 'manual', ...options }).sectionLyrics));
+same('a line goes to the section it overlaps most, or the next one when it starts in its pickup or a beat before', [
+  home(line(2, 4, 'Inside the verse')),
+  home(line(5.5, 8.5, 'Mostly in the verse')),
+  home(line(6.5, 10, 'Mostly in the chorus')),
+  home(line(7, 7.9, 'Two beats early')),
+  home(line(6.5, 7.9, 'Three beats early')),
+], [['Verse'], ['Verse'], ['Chorus'], ['Chorus'], ['Verse']]);
+const nudged = (offset: number, autoOffset = false) => {
+  const placed = place.placeLyrics(twoSong, [line(6, 7.5, 'Bar three')], { source: 'manual', offset, autoOffset });
+  return [Object.keys(byName(twoSong, placed.sectionLyrics)), placed.offsetUsed, placed.lyrics.offset];
+};
+same('a nudge moves every line before placing, at most 2 s either way, and is what lyrics.offset keeps', [nudged(2), nudged(5), nudged(-1)], [
+  [['Chorus'], 2, 2],
+  [['Chorus'], 2, 2],
+  [['Verse'], -1, -1],
+]);
+
+// A whole song: Intro 0-4, Verse 1 4-12, Chorus 1 12-16, Verse 2 16-24, Chorus 2 24-28, Chorus 3 28-32, Bridge 32-36,
+// then 4 bars not in a section. Chorus 2 changes one word of a 14-word slide, Chorus 3 changes a line.
+const sungSong = barSong([['intro', 0, 0], ['verse', 4], ['chorus', 12], ['verse', 16], ['chorus', 24], ['chorus', 28], ['bridge', 32, 0]], 40, 36);
+const chorusAt = (bar: number, words: string[]) =>
+  words.map((text, i) => line(i ? at(bar + i) : at(bar - 1, 4), at(bar + i) + 1.8, text));
+const chorusWords = ['Chorus line one of made up words', 'Chorus line two of made up words', 'Chorus line three of made up words', 'Chorus line four of made up words'];
+const sungLines = [
+  line(at(3, 4), 9.8, 'Verse one first'),
+  line(at(5), 11.4, 'Verse one second'),
+  line(at(5, 4), 13.8, 'Verse one third'),
+  line(at(7), 15.8, 'Verse one fourth'),
+  line(at(8, 2), 17.8, 'Verse one fifth'),
+  line(at(11, 2), 23.4, 'Verse one sixth'),
+  ...chorusAt(12, chorusWords),
+  line(at(16), 33.8, 'Verse two first'),
+  line(at(17), 35.8, 'Verse two second'),
+  line(at(22), 45.8, 'Verse two third'),
+  line(at(23), 47.4, 'Verse two fourth'),
+  ...chorusAt(24, chorusWords.map(text => text.replace('two', 'too'))),
+  ...chorusAt(28, [...chorusWords.slice(0, 3), 'A different ending']),
+  line(at(32), 66, 'Bridge words here'),
+  line(at(37), 76, 'Words after the last section'),
+];
+const placedSong = place.placeLyrics(sungSong, sungLines, { source: 'lrclib:1' });
+same('blocks: 2 lines a slide, a slide early after 2 bars of quiet, a blank for 4, a chorus shared, a changed one apart', placedSong.lyrics, {
+  source: 'lrclib:1',
+  offset: 0,
+  blocks: {
+    'verse-1': [['Verse one first', 'Verse one second'], ['Verse one third', 'Verse one fourth'], ['Verse one fifth'], ['Verse one sixth']],
+    chorus: [chorusWords.slice(0, 2), chorusWords.slice(2)],
+    'verse-2': [['Verse two first', 'Verse two second'], [], ['Verse two third', 'Verse two fourth']],
+    'chorus-3': [chorusWords.slice(0, 2), [chorusWords[2], 'A different ending']],
+    bridge: [['Bridge words here']],
+  },
+});
+same('slide bars: from each section start, a beat before a bar snaps on to it, later in a bar snaps back', byName(sungSong, placedSong.sectionLyrics), {
+  'Verse 1': { block: 'verse-1', slideBars: [0, 2, 4, 7] },
+  'Chorus 1': { block: 'chorus', slideBars: [0, 2] },
+  'Verse 2': { block: 'verse-2', slideBars: [0, 2, 6] },
+  'Chorus 2': { block: 'chorus', slideBars: [0, 2] },
+  'Chorus 3': { block: 'chorus-3', slideBars: [0, 2] },
+  Bridge: { block: 'bridge', slideBars: [0] },
+});
+same('words after the last section are unplaced, and nothing needs checking', [timed(placedSong.unplaced), placedSong.checkWords, placedSong.offsetUsed, placedSong.offsetEstimated], [
+  [[74, 76, 'Words after the last section', 'lrc']],
+  {},
+  0,
+  false,
+]);
+const perSlide = (n: number) => {
+  const placed = place.placeLyrics(sungSong, sungLines, { source: 'lrclib:1', linesPerSlide: n });
+  return [placed.lyrics.blocks['verse-1'].map(slide => slide.length), byName(sungSong, placed.sectionLyrics)['Verse 1'].slideBars];
+};
+same('lines per slide: 1 and 4', [perSlide(1), perSlide(4)], [[[1, 1, 1, 1, 1, 1], [0, 1, 2, 3, 4, 7]], [[4, 1, 1], [0, 4, 7]]]);
+const longSong = barSong([['verse', 0]], 16);
+const lone = (lines: Line[]) => {
+  const placed = place.placeLyrics(longSong, lines, { source: 'manual', linesPerSlide: 1 });
+  return [placed.lyrics.blocks.verse, placed.sectionLyrics.s0.slideBars];
+};
+same('words 4 bars into a section open on a blank, 4 quiet bars at its end go blank, slides on one bar are one', [
+  lone([line(at(6), at(7), 'Late words')]),
+  lone([line(at(1), at(1, 2), 'Quick'), line(at(1, 2), at(1, 3), 'words')]),
+], [
+  [[[], ['Late words'], []], [0, 6, 7]],
+  [[['Quick', 'words'], []], [0, 2]],
+]);
+const twoVerses = barSong([['verse', 0], ['verse', 4]], 8);
+const versesWith = (second: string) =>
+  Object.keys(place.placeLyrics(twoVerses, [
+    line(0, 1.5, 'a b c d e f g h i j'), line(at(2), at(2) + 1.5, 'yes'), line(at(4), at(4) + 1.5, 'a b c d e f g h i j'), line(at(6), at(6) + 1.5, second),
+  ], { source: 'manual', linesPerSlide: 1 }).lyrics.blocks);
+same('verses share a block only when every slide matches: 10 of 11 words is not enough if a slide differs', [versesWith('yes'), versesWith('no')], [['verse'], ['verse-1', 'verse-2']]);
+const pickupSong = barSong([['intro', 0, 0], ['verse', 4, 2]], 8);
+same('quiet after a pickup line counts from where it ends, before the section starts', place.placeLyrics(pickupSong, [line(7, 7.5, 'Pickup'), line(11.5, 12.5, 'Two bars on')], { source: 'manual' }).sectionLyrics.s1, {
+  block: 'verse',
+  slideBars: [0, 2],
+});
+
+const moved = (by: number) => sungLines.map(item => ({ ...item, start: item.start + by, end: item.end + by }));
+const estimated = place.placeLyrics(sungSong, moved(-3), { source: 'lrclib:1', autoOffset: true });
+same('auto-offset finds a record 3 s early from downbeats and section starts, and places it the same', [
+  estimated.offsetUsed, estimated.offsetEstimated, estimated.lyrics, estimated.sectionLyrics,
+], [3, true, placedSong.lyrics, placedSong.sectionLyrics]);
+same('and one 3 s late, not a whole bar or two off', place.placeLyrics(sungSong, moved(3), { source: 'lrclib:1', autoOffset: true }).offsetUsed, -3);
+const estimatedNudge = place.placeLyrics(sungSong, moved(-3), { source: 'lrclib:1', autoOffset: true, offset: 0.5 });
+same('a nudge moves the estimate, and lyrics.offset keeps just the nudge', [estimatedNudge.offsetUsed, estimatedNudge.lyrics.offset], [3.5, 0.5]);
+
+// A placed song keeps its lead and fade, drops a lyric its section no longer has, and survives a .djw round trip.
+const before = { ...sungSong, lyrics: { leadBeats: 3, fadeBeats: 0.5, blocks: { old: [['Old words']] } }, sections: sungSong.sections.map((x, i) => (i ? x : { ...x, lyric: { block: 'old', slideBars: [0] } })) };
+const sungPlaced = place.withPlacement(before, placedSong);
+const placedWarnings: string[] = [];
+const placedBack = djw.parseDjw(djw.serializeDjw(sungPlaced, { includeAudioPath: false }), placedWarnings);
+same('a placed song exported and read back keeps its words, lead, fade and slide bars', [placedBack.lyrics, placedBack.sections.map(x => x.lyric ?? null), placedWarnings], [
+  { source: 'lrclib:1', offset: 0, leadBeats: 3, fadeBeats: 0.5, blocks: placedSong.lyrics.blocks },
+  [null, ...Object.values(byName(sungSong, placedSong.sectionLyrics))],
+  [],
+]);
+
+const farPlaced = await place.findAndPlaceLyrics(tube, { captions: tracks(), fetch: lrclibFar() });
+const nearPlaced = await place.findAndPlaceLyrics(tube, { captions: tracks(), fetch: lrclibHit() });
+same('find and place: a far LRCLIB record gets its offset estimated, a matching one does not', [
+  farPlaced?.placement.offsetEstimated, nearPlaced?.placement.offsetEstimated, nearPlaced?.song.lyrics?.source, nearPlaced?.song.timedLyrics?.length,
+], [true, false, 'lrclib:7', 2]);
+
+// Slide changes on the screen: the cue from a Perform snapshot, then the cues a display gets. 120 BPM in 4/4, so bar n
+// starts at 2n s and a beat is 0.5 s. Intro 0-4, Verse 4-12, Chorus 12-16, Bridge 16-20 with a 2-beat pickup, then an
+// Instrumental with no words to bar 24. The Verse's third slide is a "-" blank. Words are made up.
+const cueLib = await import('../src/lib/lyricsCue.ts');
+type CueSnap = import('../src/audio/engine.ts').Snapshot;
+type CueIn = import('../src/lib/lyricsCue.ts').CueInput;
+const withWords = (song: PlacedSong, more: Partial<import('../src/types.ts').Lyrics> = {}) => {
+  const slideBars: Record<string, number[]> = { verse: [0, 2, 4, 6], chorus: [0, 2], bridge: [0] };
+  return {
+    ...song,
+    lyrics: { blocks: { verse: [['Verse a'], ['Verse b'], [], ['Verse c']], chorus: [['Chorus a'], ['Chorus b']], bridge: [['Bridge a']] }, ...more },
+    sections: song.sections.map(x => (slideBars[x.type] ? { ...x, lyric: { block: x.type, slideBars: slideBars[x.type] } } : x)),
+  } as PlacedSong;
+};
+const cueBase = barSong([['intro', 0, 0], ['verse', 4], ['chorus', 12], ['bridge', 16, 2], ['instrumental', 20, 0]], 24);
+const psOf = (song: PlacedSong) => ({ song, grid: map.songGrid(song), views: map.sectionViews(song) });
+const cuePs = psOf(withWords(cueBase));
+/** `pos` audio seconds into section `idx` (Verse 1, Chorus 2, Bridge 3), the next pass landing at `next[1]`, in this pass's audio seconds. */
+const snapAt = (idx: number, pos: number, next?: [number, number], more: Partial<NonNullable<CueSnap['song']>> = {}, paused = false): CueSnap => ({
+  paused,
+  song: {
+    ...{ title: 'Made Up Song', idx, pass: 1, repeats: 1, hold: false, bar: 0, beat: 1, beatsPerBar: 4, pos, barsLeft: 0, secondsLeft: 0 },
+    next: next ? { idx: next[0], reason: 'plan', bars: 0, beats: 0, landingCtx: next[1] + 100 } : null,
+    ...{ ending: false, forced: false, arriving: false, ...more },
+  },
+  ...{ pad: null, padFading: false, clock: null },
+});
+/** The cue, with context time 100 s ahead of audio time. Gives [now, next, change time in audio seconds, fade seconds]. */
+const cueOf = (snapshot: CueSnap, ps = cuePs, prefs?: import('../src/lib/lyricsCue.ts').LyricsPrefs) => {
+  const cue = cueLib.lyricsCue(snapshot, ps, snapshot.song!.pos + 100, prefs);
+  return [cue.now, cue.next, cue.changeAt === null ? null : r3(cue.changeAt - 100), r3(cue.fadeSeconds)];
+};
+const inVerse = (pos: number) => snapAt(1, pos, [2, 24]);
+same('in a section: the next slide comes in 2 beats before its bar and fades over a beat; a "-" blank comes in on its bar', [inVerse(10), inVerse(11.2), inVerse(16.2)].map(x => cueOf(x)), [
+  [['Verse a'], ['Verse b'], 11, 0.5],
+  [['Verse b'], [], 16, 0.5],
+  [[], ['Verse c'], 19, 0.5],
+]);
+same('in order across a section change: the next section first slide counts back from where it lands', cueOf(inVerse(22)), [['Verse c'], ['Chorus a'], 23, 0.5]);
+same('a loop back to the same section, and a hold, bring back its first slide', [cueOf(snapAt(2, 30, [2, 32])), cueOf(snapAt(1, 22, [1, 24], { hold: true }))], [
+  [['Chorus b'], ['Chorus a'], 31, 0.5],
+  [['Verse c'], ['Verse a'], 23, 0.5],
+]);
+const toBridge = (pos: number) => snapAt(1, pos, [3, 16]);
+same('a picked jump: the Bridge comes in 2.5 beats ahead for its 2-beat pickup, and Verse slides past the jump never show', [10, 13, 15].map(pos => cueOf(toBridge(pos))), [
+  [['Verse a'], ['Verse b'], 11, 0.5],
+  [['Verse b'], ['Bridge a'], 14.75, 0.5],
+  [['Bridge a'], null, null, 0.5],
+]);
+const tightBase = withWords(cueBase, { leadBeats: 5 });
+const tightPs = psOf({ ...tightBase, sections: tightBase.sections.map(x => (x.type === 'chorus' ? { ...x, lyric: { block: 'chorus', slideBars: [0, 1] } } : x)) });
+same('a 5-beat lead with the next section slides a bar apart cues its second slide before it lands too', cueOf(inVerse(23), tightPs), [['Chorus a'], ['Chorus b'], 23.5, 0.5]);
+same('a jump that lands on a bar with its own slide, into a section with no words, never shows that slide', cueOf(snapAt(2, 27.2, [4, 28])), [['Chorus a'], [], 28, 0.5]);
+same('a pick too late for its lead puts its slide up now; taking the plan back returns to the slide that was up', [cueOf(toBridge(15.5)), cueOf(inVerse(15.55))], [
+  [['Bridge a'], null, null, 0.5],
+  [['Verse b'], [], 16, 0.5],
+]);
+same('paused: the slide stays and nothing is cued', cueOf(snapAt(1, 10, [2, 24], {}, true)), [['Verse a'], null, null, 0.5]);
+same('between songs, and through a song with no words, the screen is idle', [
+  cueLib.lyricsCue({ ...inVerse(10), song: null }, null, 50),
+  cueLib.lyricsCue(inVerse(10), psOf(cueBase), 110).idle,
+], [{ now: [], since: null, next: null, changeAt: null, fadeSeconds: 0.5, idle: true }, true]);
+same('a song coming in before its first slide is due leaves up what is up', cueOf(snapAt(1, 6.9, [2, 24], { arriving: true })), [null, ['Verse a'], 7, 0.5]);
+const leadIs = (lyrics: Partial<import('../src/types.ts').Lyrics>, prefs?: import('../src/lib/lyricsCue.ts').LyricsPrefs) => {
+  const ps = psOf(withWords(cueBase, lyrics));
+  return [cueOf(inVerse(10), ps, prefs).slice(2), cueOf(inVerse(22), ps, prefs)[2]];
+};
+same('lead and fade: the song value, else the app value; a first slide never later than half a beat before its pickup', [
+  leadIs({ leadBeats: 3 }),
+  leadIs({ leadBeats: 1 }),
+  leadIs({}, { leadBeats: 1, fadeBeats: 2 }),
+  leadIs({ leadBeats: 3, fadeBeats: 1.5 }, { leadBeats: 1, fadeBeats: 2 }),
+], [
+  [[10.5, 0.5], 22.5],
+  [[11.5, 0.5], 23.25],
+  [[11.5, 1], 23.25],
+  [[10.5, 0.75], 22.5],
+]);
+const slowSong = {
+  ...withWords(cueBase),
+  duration: 60,
+  taps: Array.from({ length: 100 }, (_, i) => ({ t: i < 20 ? i * 0.5 : 10 + (i - 20) * 0.6, one: i % 4 === 0 })),
+} as PlacedSong;
+same('a slower stretch on the tapped grid moves the change and lengthens the fade', cueOf(snapAt(1, 10), psOf(slowSong)), [['Verse a'], ['Verse b'], 11.2, 0.6]);
+same('held, a Verse that starts faster than it ends counts the lead on its own first beats', cueOf(snapAt(1, 23, [1, 24.4]), psOf(slowSong)), [['Verse c'], ['Verse a'], 23.4, 0.6]);
+
+/** Feeds the sequencer one [context time, snapshot, input] per tick, the display clock in ms on the context clock. The cues sent per tick, as [seq, words or "-" or "logo", at, fade ms]. */
+function feed(ticks: Array<[number, CueSnap, Partial<CueIn>?]>, ps: Parameters<typeof cueLib.lyricsCue>[1] = cuePs) {
+  let state = cueLib.CUE_START;
+  return ticks.map(([ctxNow, snapshot, input = {}]) => {
+    const step = cueLib.nextCue(state, cueLib.lyricsCue(snapshot, ps, ctxNow), { ctxNow, ms: ctxNow * 1000, ...input });
+    state = step.state;
+    return step.cues.map(cue => [cue.seq, cue.text || (cue.logo ? 'logo' : '-'), r3(cue.changeAtMs / 1000 - 100), cue.fadeMs]);
+  });
+}
+const tick = (pos: number, input?: Partial<CueIn>, paused = false): [number, CueSnap, Partial<CueIn>?] => [pos + 100, snapAt(1, pos, [2, 24], {}, paused), input];
+const scripted = feed([
+  tick(10),
+  tick(10.1, { mode: 'blank' }),
+  tick(10.2, { mode: 'logo' }),
+  tick(10.3),
+  tick(10.4, { tap: ['Chorus b'] }),
+  tick(10.5),
+  tick(11.2),
+  tick(11.3, {}, true),
+  tick(11.35, {}, true),
+  tick(11.4),
+]);
+same('display cues: the slide up now with a quick fade, then the next cued ahead with the full fade', scripted[0], [[1, 'Verse a', 10, 250], [2, 'Verse b', 11, 500]]);
+same('Blank goes to black and Logo to the logo at once, dropping the cue to come; back to words cues it again', scripted.slice(1, 4), [
+  [[3, '-', 10.1, 250]],
+  [[4, 'logo', 10.2, 250]],
+  [[5, 'Verse a', 10.3, 250], [6, 'Verse b', 11, 500]],
+]);
+same('a tapped slide goes up now and stays until the next change comes due, then the words follow on', scripted.slice(4, 7), [
+  [[7, 'Chorus b', 10.4, 250], [8, 'Verse b', 11, 500]],
+  [],
+  [[9, '-', 16, 500]],
+]);
+same('pause sends what is up again to clear the cue to come, sends nothing while paused, and cues it again after', scripted.slice(7), [
+  [[10, 'Verse b', 11.3, 0]],
+  [],
+  [[11, '-', 16, 500]],
+]);
+const idleSnap = { ...inVerse(0), song: null };
+same('between songs: black, or the logo; a song with no words shows the same', [
+  feed([[50, idleSnap]]),
+  feed([[50, idleSnap, { idle: 'logo' }]]),
+  feed([tick(10, { idle: 'logo' })], psOf(cueBase)),
+], [[[[1, '-', -50, 250]]], [[[1, 'logo', -50, 250]]], [[[1, 'logo', 10, 250]]]]);
+same('the next song coming in keeps the last words up until its first slide is cued', feed([tick(22), [122.1, snapAt(1, 6.6, [2, 24], { arriving: true })]]), [
+  [[1, 'Verse c', 22, 250], [2, 'Chorus a', 23, 500]],
+  [[3, 'Verse a', 22.5, 500]],
+]);
+same('clocks 30 ms apart around a change: nothing is resent and the change lands once', feed([
+  tick(10.9),
+  tick(10.985, { ms: 110985 + 30 }),
+  tick(11.01, { ms: 111010 - 30 }),
+  tick(11.1),
+]), [[[1, 'Verse a', 10.9, 250], [2, 'Verse b', 11, 500]], [], [], [[3, '-', 16, 500]]]);
+
+const displayCue = (seq: number, text: string, changeAtMs: number) => ({ seq, text, logo: false, changeAtMs, fadeMs: 500 });
+const displaySteps: Array<[ReturnType<typeof displayCue>, number]> = [
+  [displayCue(1, 'A', 0), 0],
+  [displayCue(2, 'B', 1000), 10],
+  [displayCue(3, 'C', 2000), 20],
+  [displayCue(2, 'B', 1000), 30],
+  [displayCue(4, 'D', 3000), 2500],
+];
+let display: import('../src/lib/lyricsCue.ts').DisplayState = { seq: 0, up: null, pending: null };
+same('a display: a higher seq replaces the cue to come, an older one is ignored, one already due goes up first', displaySteps.map(([cue, ms]) => {
+  display = cueLib.takeCue(display, cue, ms);
+  return [display.up?.text ?? null, display.pending?.text ?? null];
+}), [['A', null], ['A', 'B'], ['A', 'C'], ['A', 'C'], ['C', 'D']]);
+
+// Through the engine: Perform plays from the Verse on the test clock (it lands at 1.1 s, so the context time is 6.9 s
+// behind audio time), ticking every 10 ms. Each step runs at its context time. The cues as [words, at, fade ms].
+function cuesFrom(ps: ReturnType<typeof psOf>, steps: Array<[number, (session: Session) => void]>, until: number, input: Partial<CueIn> = {}) {
+  clockNow = 0;
+  const session = new engine.PerformSession(async () => null);
+  session.startSong({ ...ps, buffer: { duration: ps.song.duration } } as never, { from: 1 });
+  let state = cueLib.CUE_START;
+  const out: Array<[string, number, number]> = [];
+  for (let k = 0, i = 0; k <= until * 100; k++) {
+    clockNow = k / 100;
+    while (i < steps.length && clockNow >= steps[i][0]) steps[i++][1](session);
+    session.tick();
+    const step = cueLib.nextCue(state, cueLib.lyricsCue(session.snapshot(), ps, clockNow), { ctxNow: clockNow, ms: clockNow * 1000, ...input });
+    state = step.state;
+    out.push(...step.cues.map(cue => [cue.text || (cue.logo ? 'logo' : '-'), r3(cue.changeAtMs / 1000), cue.fadeMs] as [string, number, number]));
+  }
+  return out;
+}
+const opening: Array<[string, number, number]> = [['-', 0, 250], ['Verse a', 0.1, 500], ['Verse b', 4.1, 500]];
+same('played in order through the engine: one cue per change, each cued ahead, then the logo when the song ends', cuesFrom(cuePs, [], 42, { idle: 'logo' }), [
+  ...opening,
+  ['-', 9.1, 500],
+  ['Verse c', 12.1, 500],
+  ['Chorus a', 16.1, 500],
+  ['Chorus b', 20.1, 500],
+  ['Bridge a', 23.85, 500],
+  ['-', 33.1, 500],
+  ['logo', 41.1, 250],
+]);
+same('Hold through the engine brings the Verse round again', cuesFrom(cuePs, [[10, session => session.toggleHold()]], 21).slice(4), [
+  ['Verse c', 12.1, 500],
+  ['Verse a', 16.1, 500],
+  ['Verse b', 20.1, 500],
+  ['-', 25.1, 500],
+]);
+same('a pick through the engine cues the Bridge ahead of where it lands, and cancelling it cues the Verse again', [
+  cuesFrom(cuePs, [[2, session => session.pickSection(3)]], 18),
+  cuesFrom(cuePs, [[2, session => session.pickSection(3)], [5, session => session.cancel()]], 13),
+], [
+  [...opening, ['Bridge a', 7.85, 500], ['-', 17.1, 500]],
+  [...opening, ['Bridge a', 7.85, 500], ['-', 9.1, 500], ['Verse c', 12.1, 500], ['Chorus a', 16.1, 500]],
+]);
+same('with a 4-beat lead, a late pick puts the Chorus up at once, and cancelling it goes back to the Verse', cuesFrom(psOf(withWords(cueBase, { leadBeats: 4 })), [
+  [7.6, session => session.pickSection(2)],
+  [7.7, session => session.cancel()],
+], 9.5), [
+  ['Verse a', 0, 250],
+  ['Verse b', 3.1, 500],
+  ['-', 9.1, 500],
+  ['Chorus a', 7.6, 250],
+  ['Chorus b', 11.1, 500],
+  ['Verse b', 7.7, 250],
+  ['-', 9.1, 500],
+  ['Verse c', 11.1, 500],
+]);
 
 if (failed) {
   console.log(`\n${failed} failed`);

@@ -1,4 +1,5 @@
 mod analytics;
+mod captions;
 mod diagnostics;
 mod downloads;
 mod error;
@@ -369,6 +370,8 @@ pub fn run() {
             downloads::remove_download,
             downloads::library_file,
             downloads::save_text,
+            downloads::fetch_captions,
+            downloads::saved_captions,
             ios::pick_import_files,
             ios::set_keep_awake,
             #[cfg(all(debug_assertions, target_os = "ios"))]

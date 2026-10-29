@@ -111,6 +111,7 @@ export async function importSong(
     taps: map?.taps ?? [],
     fill: false,
     sections: map ? map.sections.map(section => ({ id: uid(), ...section })) : [],
+    ...(map?.lyrics ? { lyrics: map.lyrics } : {}),
     marksEnd: map ? (map.marksEnd ?? buffer.duration) : 0,
     refined: Boolean(map),
     updatedAt: now,

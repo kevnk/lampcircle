@@ -34,6 +34,16 @@ export const browserPlatform: Platform = {
       if (!response.ok) throw new Error(`Could not read ${name}.`);
       return response.blob();
     },
+    async captions(url) {
+      const response = await fetch(`/api/captions?url=${encodeURIComponent(url)}`);
+      if (!response.ok) throw new Error('Could not fetch captions.');
+      return response.json();
+    },
+    async savedCaptions(fileName) {
+      const response = await fetch(`/api/captions?file=${encodeURIComponent(fileName)}`);
+      if (!response.ok) throw new Error('Could not read captions.');
+      return response.json();
+    },
   },
   async saveText(text, fileName) {
     download(new Blob([text], { type: 'text/yaml' }), fileName);
