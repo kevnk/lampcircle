@@ -740,6 +740,217 @@ same('find and place: a far LRCLIB record gets its offset estimated, a matching 
   farPlaced?.placement.offsetEstimated, nearPlaced?.placement.offsetEstimated, nearPlaced?.song.lyrics?.source, nearPlaced?.song.timedLyrics?.length,
 ], [true, false, 'lrclib:7', 2]);
 
+// Slide changes on the screen: the cue from a Perform snapshot, then the cues a display gets. 120 BPM in 4/4, so bar n
+// starts at 2n s and a beat is 0.5 s. Intro 0-4, Verse 4-12, Chorus 12-16, Bridge 16-20 with a 2-beat pickup, then an
+// Instrumental with no words to bar 24. The Verse's third slide is a "-" blank. Words are made up.
+const cueLib = await import('../src/lib/lyricsCue.ts');
+type CueSnap = import('../src/audio/engine.ts').Snapshot;
+type CueIn = import('../src/lib/lyricsCue.ts').CueInput;
+const withWords = (song: PlacedSong, more: Partial<import('../src/types.ts').Lyrics> = {}) => {
+  const slideBars: Record<string, number[]> = { verse: [0, 2, 4, 6], chorus: [0, 2], bridge: [0] };
+  return {
+    ...song,
+    lyrics: { blocks: { verse: [['Verse a'], ['Verse b'], [], ['Verse c']], chorus: [['Chorus a'], ['Chorus b']], bridge: [['Bridge a']] }, ...more },
+    sections: song.sections.map(x => (slideBars[x.type] ? { ...x, lyric: { block: x.type, slideBars: slideBars[x.type] } } : x)),
+  } as PlacedSong;
+};
+const cueBase = barSong([['intro', 0, 0], ['verse', 4], ['chorus', 12], ['bridge', 16, 2], ['instrumental', 20, 0]], 24);
+const psOf = (song: PlacedSong) => ({ song, grid: map.songGrid(song), views: map.sectionViews(song) });
+const cuePs = psOf(withWords(cueBase));
+/** `pos` audio seconds into section `idx` (Verse 1, Chorus 2, Bridge 3), the next pass landing at `next[1]`, in this pass's audio seconds. */
+const snapAt = (idx: number, pos: number, next?: [number, number], more: Partial<NonNullable<CueSnap['song']>> = {}, paused = false): CueSnap => ({
+  paused,
+  song: {
+    ...{ title: 'Made Up Song', idx, pass: 1, repeats: 1, hold: false, bar: 0, beat: 1, beatsPerBar: 4, pos, barsLeft: 0, secondsLeft: 0 },
+    next: next ? { idx: next[0], reason: 'plan', bars: 0, beats: 0, landingCtx: next[1] + 100 } : null,
+    ...{ ending: false, forced: false, arriving: false, ...more },
+  },
+  ...{ pad: null, padFading: false, clock: null },
+});
+/** The cue, with context time 100 s ahead of audio time. Gives [now, next, change time in audio seconds, fade seconds]. */
+const cueOf = (snapshot: CueSnap, ps = cuePs, prefs?: import('../src/lib/lyricsCue.ts').LyricsPrefs) => {
+  const cue = cueLib.lyricsCue(snapshot, ps, snapshot.song!.pos + 100, prefs);
+  return [cue.now, cue.next, cue.changeAt === null ? null : r3(cue.changeAt - 100), r3(cue.fadeSeconds)];
+};
+const inVerse = (pos: number) => snapAt(1, pos, [2, 24]);
+same('in a section: the next slide comes in 2 beats before its bar and fades over a beat; a "-" blank comes in on its bar', [inVerse(10), inVerse(11.2), inVerse(16.2)].map(x => cueOf(x)), [
+  [['Verse a'], ['Verse b'], 11, 0.5],
+  [['Verse b'], [], 16, 0.5],
+  [[], ['Verse c'], 19, 0.5],
+]);
+same('in order across a section change: the next section first slide counts back from where it lands', cueOf(inVerse(22)), [['Verse c'], ['Chorus a'], 23, 0.5]);
+same('a loop back to the same section, and a hold, bring back its first slide', [cueOf(snapAt(2, 30, [2, 32])), cueOf(snapAt(1, 22, [1, 24], { hold: true }))], [
+  [['Chorus b'], ['Chorus a'], 31, 0.5],
+  [['Verse c'], ['Verse a'], 23, 0.5],
+]);
+const toBridge = (pos: number) => snapAt(1, pos, [3, 16]);
+same('a picked jump: the Bridge comes in 2.5 beats ahead for its 2-beat pickup, and Verse slides past the jump never show', [10, 13, 15].map(pos => cueOf(toBridge(pos))), [
+  [['Verse a'], ['Verse b'], 11, 0.5],
+  [['Verse b'], ['Bridge a'], 14.75, 0.5],
+  [['Bridge a'], null, null, 0.5],
+]);
+const tightBase = withWords(cueBase, { leadBeats: 5 });
+const tightPs = psOf({ ...tightBase, sections: tightBase.sections.map(x => (x.type === 'chorus' ? { ...x, lyric: { block: 'chorus', slideBars: [0, 1] } } : x)) });
+same('a 5-beat lead with the next section slides a bar apart cues its second slide before it lands too', cueOf(inVerse(23), tightPs), [['Chorus a'], ['Chorus b'], 23.5, 0.5]);
+same('a jump that lands on a bar with its own slide, into a section with no words, never shows that slide', cueOf(snapAt(2, 27.2, [4, 28])), [['Chorus a'], [], 28, 0.5]);
+same('a pick too late for its lead puts its slide up now; taking the plan back returns to the slide that was up', [cueOf(toBridge(15.5)), cueOf(inVerse(15.55))], [
+  [['Bridge a'], null, null, 0.5],
+  [['Verse b'], [], 16, 0.5],
+]);
+same('paused: the slide stays and nothing is cued', cueOf(snapAt(1, 10, [2, 24], {}, true)), [['Verse a'], null, null, 0.5]);
+same('between songs, and through a song with no words, the screen is idle', [
+  cueLib.lyricsCue({ ...inVerse(10), song: null }, null, 50),
+  cueLib.lyricsCue(inVerse(10), psOf(cueBase), 110).idle,
+], [{ now: [], since: null, next: null, changeAt: null, fadeSeconds: 0.5, idle: true }, true]);
+same('a song coming in before its first slide is due leaves up what is up', cueOf(snapAt(1, 6.9, [2, 24], { arriving: true })), [null, ['Verse a'], 7, 0.5]);
+const leadIs = (lyrics: Partial<import('../src/types.ts').Lyrics>, prefs?: import('../src/lib/lyricsCue.ts').LyricsPrefs) => {
+  const ps = psOf(withWords(cueBase, lyrics));
+  return [cueOf(inVerse(10), ps, prefs).slice(2), cueOf(inVerse(22), ps, prefs)[2]];
+};
+same('lead and fade: the song value, else the app value; a first slide never later than half a beat before its pickup', [
+  leadIs({ leadBeats: 3 }),
+  leadIs({ leadBeats: 1 }),
+  leadIs({}, { leadBeats: 1, fadeBeats: 2 }),
+  leadIs({ leadBeats: 3, fadeBeats: 1.5 }, { leadBeats: 1, fadeBeats: 2 }),
+], [
+  [[10.5, 0.5], 22.5],
+  [[11.5, 0.5], 23.25],
+  [[11.5, 1], 23.25],
+  [[10.5, 0.75], 22.5],
+]);
+const slowSong = {
+  ...withWords(cueBase),
+  duration: 60,
+  taps: Array.from({ length: 100 }, (_, i) => ({ t: i < 20 ? i * 0.5 : 10 + (i - 20) * 0.6, one: i % 4 === 0 })),
+} as PlacedSong;
+same('a slower stretch on the tapped grid moves the change and lengthens the fade', cueOf(snapAt(1, 10), psOf(slowSong)), [['Verse a'], ['Verse b'], 11.2, 0.6]);
+same('held, a Verse that starts faster than it ends counts the lead on its own first beats', cueOf(snapAt(1, 23, [1, 24.4]), psOf(slowSong)), [['Verse c'], ['Verse a'], 23.4, 0.6]);
+
+/** Feeds the sequencer one [context time, snapshot, input] per tick, the display clock in ms on the context clock. The cues sent per tick, as [seq, words or "-" or "logo", at, fade ms]. */
+function feed(ticks: Array<[number, CueSnap, Partial<CueIn>?]>, ps: Parameters<typeof cueLib.lyricsCue>[1] = cuePs) {
+  let state = cueLib.CUE_START;
+  return ticks.map(([ctxNow, snapshot, input = {}]) => {
+    const step = cueLib.nextCue(state, cueLib.lyricsCue(snapshot, ps, ctxNow), { ctxNow, ms: ctxNow * 1000, ...input });
+    state = step.state;
+    return step.cues.map(cue => [cue.seq, cue.text || (cue.logo ? 'logo' : '-'), r3(cue.changeAtMs / 1000 - 100), cue.fadeMs]);
+  });
+}
+const tick = (pos: number, input?: Partial<CueIn>, paused = false): [number, CueSnap, Partial<CueIn>?] => [pos + 100, snapAt(1, pos, [2, 24], {}, paused), input];
+const scripted = feed([
+  tick(10),
+  tick(10.1, { mode: 'blank' }),
+  tick(10.2, { mode: 'logo' }),
+  tick(10.3),
+  tick(10.4, { tap: ['Chorus b'] }),
+  tick(10.5),
+  tick(11.2),
+  tick(11.3, {}, true),
+  tick(11.35, {}, true),
+  tick(11.4),
+]);
+same('display cues: the slide up now with a quick fade, then the next cued ahead with the full fade', scripted[0], [[1, 'Verse a', 10, 250], [2, 'Verse b', 11, 500]]);
+same('Blank goes to black and Logo to the logo at once, dropping the cue to come; back to words cues it again', scripted.slice(1, 4), [
+  [[3, '-', 10.1, 250]],
+  [[4, 'logo', 10.2, 250]],
+  [[5, 'Verse a', 10.3, 250], [6, 'Verse b', 11, 500]],
+]);
+same('a tapped slide goes up now and stays until the next change comes due, then the words follow on', scripted.slice(4, 7), [
+  [[7, 'Chorus b', 10.4, 250], [8, 'Verse b', 11, 500]],
+  [],
+  [[9, '-', 16, 500]],
+]);
+same('pause sends what is up again to clear the cue to come, sends nothing while paused, and cues it again after', scripted.slice(7), [
+  [[10, 'Verse b', 11.3, 0]],
+  [],
+  [[11, '-', 16, 500]],
+]);
+const idleSnap = { ...inVerse(0), song: null };
+same('between songs: black, or the logo; a song with no words shows the same', [
+  feed([[50, idleSnap]]),
+  feed([[50, idleSnap, { idle: 'logo' }]]),
+  feed([tick(10, { idle: 'logo' })], psOf(cueBase)),
+], [[[[1, '-', -50, 250]]], [[[1, 'logo', -50, 250]]], [[[1, 'logo', 10, 250]]]]);
+same('the next song coming in keeps the last words up until its first slide is cued', feed([tick(22), [122.1, snapAt(1, 6.6, [2, 24], { arriving: true })]]), [
+  [[1, 'Verse c', 22, 250], [2, 'Chorus a', 23, 500]],
+  [[3, 'Verse a', 22.5, 500]],
+]);
+same('clocks 30 ms apart around a change: nothing is resent and the change lands once', feed([
+  tick(10.9),
+  tick(10.985, { ms: 110985 + 30 }),
+  tick(11.01, { ms: 111010 - 30 }),
+  tick(11.1),
+]), [[[1, 'Verse a', 10.9, 250], [2, 'Verse b', 11, 500]], [], [], [[3, '-', 16, 500]]]);
+
+const displayCue = (seq: number, text: string, changeAtMs: number) => ({ seq, text, logo: false, changeAtMs, fadeMs: 500 });
+const displaySteps: Array<[ReturnType<typeof displayCue>, number]> = [
+  [displayCue(1, 'A', 0), 0],
+  [displayCue(2, 'B', 1000), 10],
+  [displayCue(3, 'C', 2000), 20],
+  [displayCue(2, 'B', 1000), 30],
+  [displayCue(4, 'D', 3000), 2500],
+];
+let display: import('../src/lib/lyricsCue.ts').DisplayState = { seq: 0, up: null, pending: null };
+same('a display: a higher seq replaces the cue to come, an older one is ignored, one already due goes up first', displaySteps.map(([cue, ms]) => {
+  display = cueLib.takeCue(display, cue, ms);
+  return [display.up?.text ?? null, display.pending?.text ?? null];
+}), [['A', null], ['A', 'B'], ['A', 'C'], ['A', 'C'], ['C', 'D']]);
+
+// Through the engine: Perform plays from the Verse on the test clock (it lands at 1.1 s, so the context time is 6.9 s
+// behind audio time), ticking every 10 ms. Each step runs at its context time. The cues as [words, at, fade ms].
+function cuesFrom(ps: ReturnType<typeof psOf>, steps: Array<[number, (session: Session) => void]>, until: number, input: Partial<CueIn> = {}) {
+  clockNow = 0;
+  const session = new engine.PerformSession(async () => null);
+  session.startSong({ ...ps, buffer: { duration: ps.song.duration } } as never, { from: 1 });
+  let state = cueLib.CUE_START;
+  const out: Array<[string, number, number]> = [];
+  for (let k = 0, i = 0; k <= until * 100; k++) {
+    clockNow = k / 100;
+    while (i < steps.length && clockNow >= steps[i][0]) steps[i++][1](session);
+    session.tick();
+    const step = cueLib.nextCue(state, cueLib.lyricsCue(session.snapshot(), ps, clockNow), { ctxNow: clockNow, ms: clockNow * 1000, ...input });
+    state = step.state;
+    out.push(...step.cues.map(cue => [cue.text || (cue.logo ? 'logo' : '-'), r3(cue.changeAtMs / 1000), cue.fadeMs] as [string, number, number]));
+  }
+  return out;
+}
+const opening: Array<[string, number, number]> = [['-', 0, 250], ['Verse a', 0.1, 500], ['Verse b', 4.1, 500]];
+same('played in order through the engine: one cue per change, each cued ahead, then the logo when the song ends', cuesFrom(cuePs, [], 42, { idle: 'logo' }), [
+  ...opening,
+  ['-', 9.1, 500],
+  ['Verse c', 12.1, 500],
+  ['Chorus a', 16.1, 500],
+  ['Chorus b', 20.1, 500],
+  ['Bridge a', 23.85, 500],
+  ['-', 33.1, 500],
+  ['logo', 41.1, 250],
+]);
+same('Hold through the engine brings the Verse round again', cuesFrom(cuePs, [[10, session => session.toggleHold()]], 21).slice(4), [
+  ['Verse c', 12.1, 500],
+  ['Verse a', 16.1, 500],
+  ['Verse b', 20.1, 500],
+  ['-', 25.1, 500],
+]);
+same('a pick through the engine cues the Bridge ahead of where it lands, and cancelling it cues the Verse again', [
+  cuesFrom(cuePs, [[2, session => session.pickSection(3)]], 18),
+  cuesFrom(cuePs, [[2, session => session.pickSection(3)], [5, session => session.cancel()]], 13),
+], [
+  [...opening, ['Bridge a', 7.85, 500], ['-', 17.1, 500]],
+  [...opening, ['Bridge a', 7.85, 500], ['-', 9.1, 500], ['Verse c', 12.1, 500], ['Chorus a', 16.1, 500]],
+]);
+same('with a 4-beat lead, a late pick puts the Chorus up at once, and cancelling it goes back to the Verse', cuesFrom(psOf(withWords(cueBase, { leadBeats: 4 })), [
+  [7.6, session => session.pickSection(2)],
+  [7.7, session => session.cancel()],
+], 9.5), [
+  ['Verse a', 0, 250],
+  ['Verse b', 3.1, 500],
+  ['-', 9.1, 500],
+  ['Chorus a', 7.6, 250],
+  ['Chorus b', 11.1, 500],
+  ['Verse b', 7.7, 250],
+  ['-', 9.1, 500],
+  ['Verse c', 11.1, 500],
+]);
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);
