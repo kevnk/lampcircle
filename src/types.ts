@@ -88,6 +88,8 @@ export interface Song {
   lyrics?: Lyrics;
   /** The timed lines Find lyrics found, kept in the app for placement. Never written to a .djw. */
   timedLyrics?: TimedLine[];
+  /** How the timed lines were last placed, so Place again and the nudge place them the same way. Never written to a .djw. */
+  lyricsPlacing?: { linesPerSlide: number; autoOffset: boolean };
   /** Seconds. The last section ends here. */
   marksEnd: number;
   refined: boolean;

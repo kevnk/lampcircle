@@ -975,6 +975,126 @@ same('with a 4-beat lead, a late pick puts the Chorus up at once, and cancelling
   ['Verse c', 11.1, 500],
 ]);
 
+// Finessing lyrics on Map Song: the lane's boxes and the slide edits. 120 BPM in 4/4, so bar n starts at 2n s. Intro
+// bars 0-2, Verse 1 2-6, Chorus 1 6-12, Verse 2 12-16, Chorus 2 16-20 with no pickup. The choruses share a block, and
+// so do the verses. Words are made up.
+const lyricsEdit = await import('../src/lib/lyricsEdit.ts');
+const editBase = barSong([['intro', 0, 0], ['verse', 2], ['chorus', 6], ['verse', 12], ['chorus', 16, 0]], 20);
+const editSong = {
+  ...editBase,
+  lyrics: { source: 'manual', blocks: { verse: [['Alpha one', 'alpha two'], ['Beta one']], chorus: [['Gamma one', 'gamma two', 'gamma three'], [], ['Delta one']] } },
+  sections: editBase.sections.map(x => (x.type === 'intro' ? x : { ...x, lyric: { block: x.type, slideBars: x.type === 'verse' ? [0, 2] : [0, 2, 3] } })),
+} as PlacedSong;
+/** Each section's slide bars, and the blocks. */
+const shape = (song: PlacedSong) => [Object.fromEntries(song.sections.filter(x => x.lyric).map(x => [x.id, x.lyric!.slideBars])), song.lyrics?.blocks];
+const lane = (song: PlacedSong) =>
+  lyricsEdit.laneSlides(song).map(x => [x.sectionId, x.i, x.start, x.end, x.changeAt, x.lines[0] ?? '-', x.shared, x.last, x.check]);
+same('the lane: a box per slide from its bar to the next, the change 2 beats ahead, a blank on its bar', lane(editSong).slice(0, 5), [
+  ['s1', 0, 4, 8, 3, 'Alpha one', true, false, false],
+  ['s1', 1, 8, 12, 7, 'Beta one', true, true, false],
+  ['s2', 0, 12, 16, 11, 'Gamma one', true, false, false],
+  ['s2', 1, 16, 18, 16, '-', true, false, false],
+  ['s2', 2, 18, 24, 17, 'Delta one', true, true, false],
+]);
+const autoSong = { ...editSong, lyrics: { ...editSong.lyrics!, source: 'youtube-auto' }, timedLyrics: [line(4, 6, 'alpha one alpha two', 'auto'), line(8, 9, 'Beta one', 'auto')] };
+const checked = (song: PlacedSong) => lyricsEdit.laneSlides(song).filter(x => x.check).map(x => `${x.sectionId}:${x.i}`);
+same('check words: auto caption words nobody changed, every worded slide when the captions are gone, none for other sources', [
+  checked(autoSong),
+  checked(lyricsEdit.setSlideText(autoSong, 's1', 0, 'Alpha won\nalpha two')),
+  checked({ ...autoSong, timedLyrics: undefined }).length,
+  checked(editSong),
+], [['s1:0', 's1:1', 's3:0', 's3:1'], ['s1:1', 's3:1'], 8, []]);
+
+same('dragging an edge snaps to the nearest bar, stays inside its section and between its neighbours; the first slide stays put', [
+  shape(lyricsEdit.moveSlideEdge(editSong, 's1', 1, 6.9))[0].s1,
+  shape(lyricsEdit.moveSlideEdge(editSong, 's1', 1, 30))[0].s1,
+  shape(lyricsEdit.moveSlideEdge(editSong, 's2', 1, 12))[0],
+  lyricsEdit.moveSlideEdge(editSong, 's2', 2, 12) === editSong,
+  lyricsEdit.moveSlideEdge(editSong, 's1', 0, 8) === editSong,
+], [[0, 1], [0, 3], { s1: [0, 2], s2: [0, 1, 3], s3: [0, 2], s4: [0, 2, 3] }, true, true]);
+same('split: halves its lines, and every section on the block gets the new slide halfway to its next one', shape(lyricsEdit.splitSlide(editSong, 's2', 0)), [
+  { s1: [0, 2], s2: [0, 1, 2, 3], s3: [0, 2], s4: [0, 1, 2, 3] },
+  { verse: editSong.lyrics!.blocks.verse, chorus: [['Gamma one', 'gamma two'], ['gamma three'], [], ['Delta one']] },
+]);
+same('split at the cursor, mid-line; refused for a blank, a single word, or when a section on the block has no bar for it', [
+  lyricsEdit.splitText('Gamma one\ngamma two\ngamma three', 14),
+  lyricsEdit.splitSlide(editSong, 's2', 1) === editSong,
+  ((oneWord: PlacedSong) => lyricsEdit.splitSlide(oneWord, 's1', 1) === oneWord)(lyricsEdit.setSlideText(editSong, 's1', 1, 'Beta')),
+  lyricsEdit.splitSlide(editSong, 's2', 2, [['Delta'], ['one']]) === editSong,
+  shape(lyricsEdit.splitSlide(editSong, 's1', 1))[1]!.verse,
+], [[['Gamma one', 'gamm'], ['a two', 'gamma three']], true, true, true, [['Alpha one', 'alpha two'], ['Beta'], ['one']]]);
+same('merge with next joins the words (a blank adds none) in every section on the block; the last slide has no next', [
+  shape(lyricsEdit.mergeNext(editSong, 's2', 1)),
+  lyricsEdit.mergeNext(editSong, 's2', 2) === editSong,
+], [[{ s1: [0, 2], s2: [0, 2], s3: [0, 2], s4: [0, 2] }, { verse: editSong.lyrics!.blocks.verse, chorus: [['Gamma one', 'gamma two', 'gamma three'], ['Delta one']] }], true]);
+same('make blank and new words change the block; a lone "-" is a blank; no change gives the same song', [
+  shape(lyricsEdit.makeBlank(editSong, 's1', 1))[1]!.verse,
+  shape(lyricsEdit.setSlideText(editSong, 's4', 2, '  Delta won \n\n delta two '))[1]!.chorus[2],
+  shape(lyricsEdit.setSlideText(editSong, 's2', 0, '-'))[1]!.chorus[0],
+  lyricsEdit.makeBlank(editSong, 's2', 1) === editSong,
+  lyricsEdit.setSlideText(editSong, 's1', 1, 'Beta one') === editSong,
+], [[['Alpha one', 'alpha two'], []], ['Delta won', 'delta two'], [], true, true]);
+const spread = lyricsEdit.moveSlideEdge(editSong, 's2', 2, at(11));
+same('use these bar positions for every section on the block: a shorter section leaves out bars past its end', [
+  shape(lyricsEdit.applyBarsToBlock(spread, 's2'))[0],
+  lyricsEdit.applyBarsToBlock(lyricsEdit.applyBarsToBlock(spread, 's2'), 's2') === lyricsEdit.applyBarsToBlock(spread, 's2'),
+  shape(lyricsEdit.applyBarsToBlock(spread, 's4'))[0].s2,
+], [{ s1: [0, 2], s2: [0, 2, 5], s3: [0, 2], s4: [0, 2] }, false, [0, 2, 3]]);
+// Chorus 2 cut short after its slides were placed, so its third slide is past its end.
+const cutShort = { ...editSong, sections: editSong.sections.map(x => (x.id === 's4' ? { ...x, lyric: { block: 'chorus', slideBars: [0, 2, 5] } } : x)) };
+same("a split where a section's slide is past its end drops its bars there, so none points at the wrong words later", shape(lyricsEdit.splitSlide(cutShort, 's2', 2))[0], {
+  s1: [0, 2], s2: [0, 2, 3, 4], s3: [0, 2], s4: [0, 2],
+});
+const editedSong = [
+  (x: PlacedSong) => lyricsEdit.splitSlide(x, 's2', 0),
+  (x: PlacedSong) => lyricsEdit.mergeNext(x, 's2', 2),
+  (x: PlacedSong) => lyricsEdit.makeBlank(x, 's1', 1),
+  (x: PlacedSong) => lyricsEdit.setSlideText(x, 's3', 0, 'Alpha one\nalpha two\n-'),
+  (x: PlacedSong) => lyricsEdit.moveSlideEdge(x, 's2', 2, at(10)),
+  (x: PlacedSong) => lyricsEdit.applyBarsToBlock(x, 's2'),
+].reduce((song, op) => op(song), editSong);
+const editedWarnings: string[] = [];
+const editedBack = opened(djw.parseDjw(djw.serializeDjw(editedSong, { includeAudioPath: false }), editedWarnings), editedSong.duration);
+// Opening a .djw gives sections new ids, so they are compared in order.
+same('edited lyrics survive a .djw export and import, with no warnings', [editedBack.sections.map(x => x.lyric ?? null), editedBack.lyrics, editedWarnings], [
+  [null, { block: 'verse', slideBars: [0, 2] }, { block: 'chorus', slideBars: [0, 1, 4] }, { block: 'verse', slideBars: [0, 2] }, { block: 'chorus', slideBars: [0, 1] }],
+  { source: 'manual', blocks: { verse: [['Alpha one', 'alpha two', '-'], []], chorus: [['Gamma one', 'gamma two'], ['gamma three'], ['Delta one']] } },
+  [],
+]);
+
+const editPs = psOf(editSong);
+const previewAt = (pos: number, paused = false) => {
+  const cue = cueLib.lyricsCue(lyricsEdit.previewSnapshot(editPs.views, pos, pos + 100, paused), editPs, pos + 100);
+  return [cue.now, cue.next, cue.changeAt === null ? null : r3(cue.changeAt - 100)];
+};
+same('the preview plays the song straight through: the intro blank, a slide 2 beats ahead, the next section, paused, then idle past the end', [
+  previewAt(1),
+  previewAt(7.5),
+  previewAt(7.5, true),
+  lyricsEdit.previewSnapshot(editPs.views, 40.5, 140.5, false).song,
+], [[[], ['Alpha one', 'alpha two'], 3], [['Beta one'], ['Gamma one', 'gamma two', 'gamma three'], 11], [['Beta one'], null, null], null]);
+
+const timedSong = {
+  ...barSong([['verse', 0], ['chorus', 4]], 12, 8),
+  lyrics: { source: 'lrclib:1', leadBeats: 3, blocks: {} },
+  timedLyrics: [line(0.1, 1.9, 'One a'), line(2.1, 3.9, 'One b'), line(4.1, 5.9, 'One c'), line(8.1, 9.9, 'Two a'), line(18, 19, 'Tail words')],
+} as PlacedSong;
+const againOne = lyricsEdit.placeAgain(timedSong, { linesPerSlide: 1 })!.song;
+const nudgedAgain = lyricsEdit.placeAgain(againOne, { offset: 0.5 })!.song;
+same('place again: lines per slide and the nudge place the found lines again, keep how, and leave the lead alone; unplaced lines are found', [
+  againOne.lyrics?.blocks,
+  againOne.lyricsPlacing,
+  [nudgedAgain.lyrics?.offset, nudgedAgain.lyrics?.leadBeats, nudgedAgain.lyricsPlacing],
+  lyricsEdit.placementOf(againOne)?.unplaced.map(x => x.text),
+  lyricsEdit.placeAgain(editSong),
+], [
+  { verse: [['One a'], ['One b'], ['One c']], chorus: [['Two a']] },
+  { linesPerSlide: 1, autoOffset: false },
+  [0.5, 3, { linesPerSlide: 1, autoOffset: false }],
+  ['Tail words'],
+  null,
+]);
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);

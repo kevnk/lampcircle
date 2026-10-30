@@ -55,9 +55,7 @@ export function lyricsCue(snapshot: Snapshot, ps: Pick<PerfSong, 'song' | 'grid'
   const lyrics = ps.song.lyrics;
   /** Audio time `beats` before `t`. */
   const before = (t: number, beats: number) => beatTime(grid, beatPos(grid, t) - beats);
-  /** Beats before its bar a slide comes in. Only a section's first slide has singers coming in early. */
-  const leadOf = (section: SectionView, bar: number, lines: string[]) =>
-    !lines.length ? 0 : bar === section.s ? Math.max(lead, section.section.pickupBeats + 0.5) : lead;
+  const leadOf = (section: SectionView, bar: number, lines: string[]) => slideLead(section, bar, lines, lead);
 
   const target = playing.next ? views[playing.next.idx] : undefined;
   const landing = target ? pos + (playing.next!.landingCtx - ctxNow) : Infinity;
@@ -84,6 +82,11 @@ export function lyricsCue(snapshot: Snapshot, ps: Pick<PerfSong, 'song' | 'grid'
     fadeSeconds: beatTime(grid, beatPos(grid, at) + fade) - at,
     idle: !views.some(item => slidesOf(item, lyrics).some(slide => slide.lines.length)),
   };
+}
+
+/** Beats before its bar (absolute) a slide comes in. A blank comes in on its bar, and only a section's first slide has singers coming in early. */
+export function slideLead(view: SectionView, bar: number, lines: string[], lead: number): number {
+  return !lines.length ? 0 : bar === view.s ? Math.max(lead, view.section.pickupBeats + 0.5) : lead;
 }
 
 /** A section's slides on absolute bars. Before its first slide, and with no words at all, it is blank. */
