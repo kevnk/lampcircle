@@ -158,7 +158,7 @@ export function nextCue(state: CueState, cue: LyricsCue, input: CueInput): { sta
   const show = (lines: string[]): Face => (lines.length ? { text: lines.join('\n'), logo: false } : cue.idle ? idle : BLACK);
   const auto = cue.now ? show(cue.now) : (up ?? show([]));
   if (input.tap) tapped = { face: { text: input.tap.join('\n'), logo: false }, over: cue.since };
-  else if (tapped && (tapped.over === null || cue.since === null ? tapped.over !== cue.since : Math.abs(tapped.over - cue.since) > 1e-3)) tapped = null;
+  else if (tapped && (tapped.over === null || cue.since === null ? tapped.over !== cue.since : Math.abs(tapped.over - cue.since) > SLACK_MS / 1000)) tapped = null;
   const want = mode === 'blank' ? BLACK : mode === 'logo' ? LOGO : (tapped?.face ?? auto);
   const next = mode === 'words' && cue.next && cue.changeAt !== null ? show(cue.next) : null;
   const coming = next && !same(next, want) ? { ...next, changeAtMs: ms + (cue.changeAt! - ctxNow) * 1000 } : null;

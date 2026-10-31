@@ -4,7 +4,8 @@ import type { Song } from '../types';
 import { Button, Card, beatsLabel } from '../ui';
 import { transport } from '../audio/engine';
 import { findLyrics, withFoundLyrics } from '../lib/lyricsFetch';
-import { CUE_START, LYRICS_PREFS, lyricsCue, nextCue, takeCue, type DisplayCue, type DisplayState } from '../lib/lyricsCue';
+import { lyricsCue, type DisplayCue, type LyricsPrefs } from '../lib/lyricsCue';
+import { WORDS_START, loadLyricsPrefs, tickWords, type ScreenFaces } from '../lib/lyricsDisplay';
 import { laneSlides, placeAgain, placementOf, placingOf, previewSnapshot } from '../lib/lyricsEdit';
 import { sectionViews, songGrid } from '../lib/songMap';
 import type { LyricsEdit } from './LyricsLane';
@@ -26,6 +27,7 @@ export function LyricsPanel({ song, edit }: { song: Song; edit: LyricsEdit | nul
   const [open, setOpen] = useState(() => Boolean(song.lyrics));
   const [finding, setFinding] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [defaults] = useState(loadLyricsPrefs);
   /** A slider being dragged: only its first change is an undo step. */
   const sliding = useRef(false);
   const lyrics = song.lyrics;
@@ -107,10 +109,10 @@ export function LyricsPanel({ song, edit }: { song: Song; edit: LyricsEdit | nul
                     ))}
                   </div>
                 </div>
-                <Slider label="Lead" value={lyrics?.leadBeats ?? LYRICS_PREFS.leadBeats} min={1} max={3} step={0.5} text={beatsLabel(lyrics?.leadBeats ?? LYRICS_PREFS.leadBeats)} disabled={!lyrics} onChange={onSlide((latest, leadBeats) => ({ ...latest, lyrics: { blocks: {}, ...latest.lyrics, leadBeats } }))} {...letGo}>
+                <Slider label="Lead" value={lyrics?.leadBeats ?? defaults.leadBeats} min={1} max={3} step={0.5} text={beatsLabel(lyrics?.leadBeats ?? defaults.leadBeats)} disabled={!lyrics} onChange={onSlide((latest, leadBeats) => ({ ...latest, lyrics: { blocks: {}, ...latest.lyrics, leadBeats } }))} {...letGo}>
                   How early a slide comes in before its bar, so the words are up before they're sung.
                 </Slider>
-                <Slider label="Fade" value={lyrics?.fadeBeats ?? LYRICS_PREFS.fadeBeats} min={0} max={2} step={0.5} text={beatsLabel(lyrics?.fadeBeats ?? LYRICS_PREFS.fadeBeats)} disabled={!lyrics} onChange={onSlide((latest, fadeBeats) => ({ ...latest, lyrics: { blocks: {}, ...latest.lyrics, fadeBeats } }))} {...letGo}>
+                <Slider label="Fade" value={lyrics?.fadeBeats ?? defaults.fadeBeats} min={0} max={2} step={0.5} text={beatsLabel(lyrics?.fadeBeats ?? defaults.fadeBeats)} disabled={!lyrics} onChange={onSlide((latest, fadeBeats) => ({ ...latest, lyrics: { blocks: {}, ...latest.lyrics, fadeBeats } }))} {...letGo}>
                   How long one slide takes to dissolve into the next.
                 </Slider>
                 <p className="text-muted">
@@ -123,7 +125,7 @@ export function LyricsPanel({ song, edit }: { song: Song; edit: LyricsEdit | nul
           </div>
           <div>
             <p className="mb-1.5 font-medium">The screen at the playhead</p>
-            <LyricsPreview song={song} />
+            <LyricsPreview song={song} prefs={defaults} />
           </div>
         </div>
       )}
@@ -144,22 +146,17 @@ function Slider({ label, text, children, ...input }: { label: string; text: stri
   );
 }
 
-type Face = { text: string; at: number; fadeMs: number; seq: number };
-
 /**
  * What the screen shows at the playhead, through the same cues a display gets: the song as if played straight through,
  * each change dissolving over the fade. A seek or pause changes it at once with a short fade, as a late pick does.
  */
-function LyricsPreview({ song }: { song: Song }) {
+function LyricsPreview({ song, prefs }: { song: Song; prefs: LyricsPrefs }) {
   const latest = useRef(song);
   latest.current = song;
-  const [faces, setFaces] = useState<{ up: Face | null; was: Face | null; p: number }>({ up: null, was: null, p: 1 });
+  const [faces, setFaces] = useState<ScreenFaces>(WORDS_START.faces);
 
   useEffect(() => {
-    let state = CUE_START;
-    let display: DisplayState = { seq: 0, up: null, pending: null };
-    let up: Face | null = null;
-    let was: Face | null = null;
+    let state = WORDS_START;
     let id = 0;
     let last = 0;
     const loop = (time: number) => {
@@ -170,32 +167,43 @@ function LyricsPreview({ song }: { song: Song }) {
       const views = sectionViews(current);
       const ms = performance.now();
       const ctxNow = ms / 1000;
-      const cue = lyricsCue(previewSnapshot(views, transport.position(), ctxNow, !transport.playing), { song: current, grid: songGrid(current), views }, ctxNow);
+      const cue = lyricsCue(previewSnapshot(views, transport.position(), ctxNow, !transport.playing), { song: current, grid: songGrid(current), views }, ctxNow, prefs);
       // Before the first slide is due there is nothing to keep up: a song starts on a black screen.
-      const step = nextCue(state, cue.now ? cue : { ...cue, now: [] }, { ctxNow, ms });
-      state = step.state;
-      for (const sent of step.cues) display = takeCue(display, sent, ms);
-      const showing: DisplayCue | null = display.pending && display.pending.changeAtMs <= ms ? display.pending : display.up;
-      if (showing && showing.seq !== up?.seq) [was, up] = [up, { text: showing.text, at: showing.changeAtMs, fadeMs: showing.fadeMs, seq: showing.seq }];
-      const p = up && up.fadeMs > 0 ? Math.min(1, Math.max(0, (ms - up.at) / up.fadeMs)) : 1;
-      setFaces(prev => (prev.up === up && prev.was === was && prev.p === p ? prev : { up, was, p }));
+      state = tickWords(state, cue.now ? cue : { ...cue, now: [] }, { ctxNow, ms }).state;
+      const next = state.faces;
+      setFaces(prev => (prev.up === next.up && prev.was === next.was && prev.p === next.p ? prev : next));
     };
     id = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(id);
-  }, []);
+  }, [prefs]);
 
-  const layer = (face: Face | null, opacity: number) =>
-    face?.text && opacity > 0 ? (
-      <div key={face.seq} className="absolute inset-0 flex flex-col items-center justify-center px-[6cqw] text-center text-[4.5cqw] font-bold leading-tight text-white" style={{ opacity }}>
+  return <SlideScreen faces={faces} className="aspect-video w-full rounded-xl" />;
+}
+
+/** A screen: white words on black, or the logo on its dark ground, each change dissolving over its fade. The words scale with the width. */
+export function SlideScreen({ faces, className, textClass = 'text-[4.5cqw]' }: { faces: ScreenFaces; className: string; textClass?: string }) {
+  const { up, was, p, from } = faces;
+  const layer = (face: DisplayCue | null, opacity: number) => {
+    if (!face || opacity <= 0) return null;
+    if (face.logo) {
+      return (
+        <div key={face.seq} className="absolute inset-0 flex items-center justify-center bg-[#121619]" style={{ opacity }}>
+          <img src="/brand/logo-dark.webp" alt="" width={600} height={376} className="h-3/5 w-auto" draggable={false} />
+        </div>
+      );
+    }
+    return face.text ? (
+      <div key={face.seq} className={`absolute inset-0 flex flex-col items-center justify-center px-[6cqw] text-center ${textClass} font-bold leading-tight text-white`} style={{ opacity }}>
         {face.text.split('\n').map((line, k) => (
           <p key={k}>{line}</p>
         ))}
       </div>
     ) : null;
+  };
   return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-line [container-type:inline-size]" role="img" aria-label={faces.up?.text ? `The screen shows: ${faces.up.text.replace(/\n/g, ' / ')}` : 'The screen is black'}>
-      {layer(faces.was, 1 - faces.p)}
-      {layer(faces.up, faces.p)}
+    <div className={`relative overflow-hidden bg-black ring-1 ring-line [container-type:inline-size] ${className}`} role="img" aria-label={up?.logo ? 'The screen shows the logo' : up?.text ? `The screen shows: ${up.text.replace(/\n/g, ' / ')}` : 'The screen is black'}>
+      {layer(was, (1 - p) * from)}
+      {layer(up, p)}
     </div>
   );
 }

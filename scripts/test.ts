@@ -1095,6 +1095,157 @@ same('place again: lines per slide and the nudge place the found lines again, ke
   null,
 ]);
 
+// The Words strip on Perform: the beats to the change, Blank and Logo, tapped slides, and the app-wide lead and fade.
+// On `cuePs`, Verse b comes in at 11 s, then a blank at 16 s. Words are made up.
+const wordsLib = await import('../src/lib/lyricsDisplay.ts');
+type WordsState = import('../src/lib/lyricsDisplay.ts').WordsState;
+const beatsAt = (snapshot: CueSnap) => {
+  const ctxNow = snapshot.song!.pos + 100;
+  return wordsLib.beatsToChange(cueLib.lyricsCue(snapshot, cuePs, ctxNow), cuePs.grid, snapshot.song!.pos, ctxNow);
+};
+const someCue = cueLib.lyricsCue(inVerse(10), cuePs, 110);
+same('the countdown: whole beats to the change, 1 through the last beat, counted on the real grid, and none while paused or after the last slide', [
+  [10, 10.25, 10.5, 10.99, 11.1].map(pos => beatsAt(inVerse(pos))),
+  wordsLib.beatsToChange({ ...someCue, changeAt: 102 }, { beats: [0, 0.5, 1, 2, 3] } as never, 0.5, 100),
+  beatsAt(snapAt(1, 10, [2, 24], {}, true)),
+  wordsLib.beatsToChange({ ...someCue, changeAt: null }, cuePs.grid, 10, 110),
+], [[2, 2, 1, 1, 10], 3, null, null]);
+
+const faceText = (state: WordsState) => (state.faces.up?.logo ? 'logo' : state.faces.up?.text || '-');
+const blank = (state: WordsState) => wordsLib.toggleScreen(state, 'blank');
+const logo = (state: WordsState) => wordsLib.toggleScreen(state, 'logo');
+const tapped = (...lines: string[]) => (state: WordsState) => wordsLib.tapSlide(state, lines);
+/** One tick per [pos, press], gives what is on the screen after each. `wobble` is seconds between the snapshot's clock and `ctxNow`, on every other tick. */
+const screenAfter = (steps: Array<[number, ((state: WordsState) => WordsState)?]>, wobble = 0) => {
+  let state = wordsLib.WORDS_START;
+  return steps.map(([pos, press], k) => {
+    if (press) state = press(state);
+    const ctxNow = pos + 100 + (k % 2) * wobble;
+    state = wordsLib.tickWords(state, cueLib.lyricsCue(inVerse(pos), cuePs, ctxNow), { ctxNow, ms: ctxNow * 1000 }).state;
+    return faceText(state);
+  });
+};
+same('Blank and Logo hold the screen and a second press goes back; one to the other just swaps', screenAfter([[10], [10.1, blank], [10.2], [10.3, blank], [10.4, logo], [10.5, blank], [10.6, logo], [10.7, logo]]), [
+  'Verse a', '-', '-', 'Verse a', 'logo', '-', 'logo', 'Verse a',
+]);
+same('going back from Blank shows the slide the song is on by then, not the one it covered', screenAfter([[10], [10.5, blank], [11.2], [11.3, blank]]), ['Verse a', '-', '-', 'Verse b']);
+same('a tap shows that slide now, it stays through the change it came early for, and the next change takes over', screenAfter([[10], [10.1, tapped('Verse b')], [10.5], [11.1], [12], [16.1]]), [
+  'Verse a', 'Verse b', 'Verse b', 'Verse b', 'Verse b', '-',
+]);
+same('a tap on a slide comes out of Blank and Logo, and a tap on a blank slide blacks the screen', [
+  screenAfter([[10], [10.1, blank], [10.2, tapped('Verse a')], [10.3, logo], [10.4, tapped('Verse b')]]),
+  screenAfter([[10], [10.1, tapped()]]),
+], [['Verse a', '-', 'Verse a', 'logo', 'Verse b'], ['Verse a', '-']]);
+same('Blank and back goes to the slide the song is on, past an earlier tap', screenAfter([[10], [10.1, tapped('Chorus a')], [10.2, blank], [10.3, blank]]), ['Verse a', 'Chorus a', '-', 'Verse a']);
+same('a tap holds when the clock read beside the snapshot wobbles by 3 ms, as two reads of the audio clock can', screenAfter([[10], [10.1, tapped('Chorus a')], [10.2], [10.3]], 0.003), ['Verse a', 'Chorus a', 'Chorus a', 'Chorus a']);
+
+/** Ticks at [pos, ms past the pos's own time, paused], gives the last state and the cues sent. */
+const fadeRun = (ticks: Array<[number, number?, boolean?]>) => {
+  let state = wordsLib.WORDS_START;
+  const sent: string[] = [];
+  for (const [pos, after = 0, paused = false] of ticks) {
+    const ctxNow = pos + 100;
+    const step = wordsLib.tickWords(state, cueLib.lyricsCue(snapAt(1, pos, [2, 24], {}, paused), cuePs, ctxNow), { ctxNow, ms: ctxNow * 1000 + after });
+    state = step.state;
+    sent.push(...step.cues.map(cue => cue.text || '-'));
+  }
+  return [faceText(state), state.faces.was?.text ?? null, r3(state.faces.p), sent];
+};
+same('the screen follows the real fade: halfway through the beat-long change it holds both slides', fadeRun([[10.9], [11.25]]), ['Verse b', 'Verse a', 0.5, ['Verse a', 'Verse b', '-']]);
+same('pause freezes: a fade under way finishes, a change still to come is called off and never lands', [
+  fadeRun([[10.9], [11.1, 0, true], [11.1, 1000, true]]),
+  fadeRun([[10.9], [10.9, 0, true], [10.9, 5000, true]]),
+  fadeRun([[10.9], [11.1], [11.2, 0, true]]),
+], [
+  ['Verse b', 'Verse a', 1, ['Verse a', 'Verse b']],
+  ['Verse a', null, 1, ['Verse a', 'Verse b', 'Verse a']],
+  ['Verse b', 'Verse a', 0.4, ['Verse a', 'Verse b', '-', 'Verse b']],
+]);
+
+const faceCue = (seq: number, text: string, at: number) => ({ seq, text, logo: false, changeAtMs: at, fadeMs: 500 });
+const cutIn = (p: number, ms: number) => {
+  const faces = wordsLib.facesAt({ up: faceCue(2, 'B', 1000), was: faceCue(1, 'A', 0), p, from: 1 }, { seq: 3, up: faceCue(3, 'C', ms), pending: null }, ms);
+  return [faces.up?.text, faces.was?.text, faces.from, faces.p];
+};
+same('a new slide cutting into a fade leaves from whichever face is stronger, at the strength it had', [cutIn(0.2, 1100), cutIn(0.7, 1350)], [['C', 'A', 0.8, 0], ['C', 'B', 0.7, 0]]);
+
+const offerAt = (press?: (state: WordsState) => WordsState, snapshot = inVerse(10)) => {
+  let state = wordsLib.tickWords(wordsLib.WORDS_START, cueLib.lyricsCue(inVerse(10), cuePs, 110), { ctxNow: 110, ms: 110000 }).state;
+  if (press) state = wordsLib.tickWords(press(state), cueLib.lyricsCue(inVerse(10), cuePs, 110), { ctxNow: 110, ms: 110000 }).state;
+  return wordsLib.slidesToOffer(state, cueLib.lyricsCue(snapshot, cuePs, snapshot.song!.pos + 100));
+};
+same('beside the screen: the next slide; the current one too once Blank, Logo or a tap covers it; nothing that would change nothing; none while paused', [
+  offerAt(),
+  offerAt(blank),
+  offerAt(logo),
+  offerAt(tapped('Verse b')),
+  offerAt(blank, inVerse(11.5)),
+  offerAt(undefined, snapAt(1, 10, [2, 24], {}, true)),
+], [
+  { current: null, next: ['Verse b'] },
+  { current: ['Verse a'], next: ['Verse b'] },
+  { current: ['Verse a'], next: ['Verse b'] },
+  { current: ['Verse a'], next: null },
+  { current: ['Verse b'], next: null },
+  { current: null, next: null },
+]);
+
+/** Through the engine, as in the cue tests above: each step runs at its context time, and the screen's cues come back as [words, at, fade ms]. */
+function holderCues(steps: Array<[number, (state: WordsState) => WordsState]>, until: number) {
+  clockNow = 0;
+  const session = new engine.PerformSession(async () => null);
+  session.startSong({ ...cuePs, buffer: { duration: cuePs.song.duration } } as never, { from: 1 });
+  let state = wordsLib.WORDS_START;
+  const out: Array<[string, number, number]> = [];
+  for (let k = 0, i = 0; k <= until * 100; k++) {
+    clockNow = k / 100;
+    while (i < steps.length && clockNow >= steps[i][0]) state = steps[i++][1](state);
+    session.tick();
+    const step = wordsLib.tickWords(state, cueLib.lyricsCue(session.snapshot(), session.ps, clockNow), { ctxNow: clockNow, ms: clockNow * 1000 });
+    state = step.state;
+    out.push(...step.cues.map(cue => [cue.text || (cue.logo ? 'logo' : '-'), r3(cue.changeAtMs / 1000), cue.fadeMs] as [string, number, number]));
+  }
+  return out;
+}
+same('through the engine: Blank clears the change to come, the song plays on under it, and back goes to the slide it reached', holderCues([[2, blank], [6, blank]], 10), [
+  ['-', 0, 250],
+  ['Verse a', 0.1, 500],
+  ['Verse b', 4.1, 500],
+  ['-', 2, 250],
+  ['Verse b', 6, 250],
+  ['-', 9.1, 500],
+  ['Verse c', 12.1, 500],
+]);
+
+const prefsFor = (lyrics: Partial<import('../src/types.ts').Lyrics>, prefs: import('../src/lib/lyricsCue.ts').LyricsPrefs) => cueOf(inVerse(10), psOf(withWords(cueBase, lyrics)), prefs).slice(2);
+same('lead and fade: the app default for a song with none, the song value wins, field by field', [
+  prefsFor({}, { leadBeats: 3, fadeBeats: 0 }),
+  prefsFor({ leadBeats: 1 }, { leadBeats: 3, fadeBeats: 2 }),
+  prefsFor({ fadeBeats: 0 }, { leadBeats: 3, fadeBeats: 2 }),
+  lyricsEdit.laneSlides(editSong, { leadBeats: 3, fadeBeats: 1 })[0].changeAt,
+], [[10.5, 0], [11.5, 1], [10.5, 0], 2.5]);
+same('the saved default: kept when good, held to its range on half beats, back to the start when broken', [
+  wordsLib.parseLyricsPrefs(null),
+  wordsLib.parseLyricsPrefs('{"leadBeats":2.5,"fadeBeats":0}'),
+  wordsLib.parseLyricsPrefs('{"leadBeats":9,"fadeBeats":-1}'),
+  wordsLib.parseLyricsPrefs('{"leadBeats":1.3}'),
+  wordsLib.parseLyricsPrefs('{"leadBeats":"x","fadeBeats":null}'),
+  wordsLib.parseLyricsPrefs('null'),
+  wordsLib.parseLyricsPrefs('not json'),
+], [
+  { leadBeats: 2, fadeBeats: 1 },
+  { leadBeats: 2.5, fadeBeats: 0 },
+  { leadBeats: 3, fadeBeats: 0 },
+  { leadBeats: 1.5, fadeBeats: 1 },
+  { leadBeats: 2, fadeBeats: 1 },
+  { leadBeats: 2, fadeBeats: 1 },
+  { leadBeats: 2, fadeBeats: 1 },
+]);
+same('a song with no lead or fade writes none to its .djw, and only slides with words count as words', [
+  ['lead_beats', 'fade_beats'].map(field => djw.serializeDjw(withWords(cueBase), { includeAudioPath: false }).includes(field)),
+  [cueBase, withWords(cueBase), { ...withWords(cueBase), lyrics: { blocks: { verse: [[]] } } }].map(song => wordsLib.hasWords(song)),
+], [[false, false], [false, true, false]]);
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);

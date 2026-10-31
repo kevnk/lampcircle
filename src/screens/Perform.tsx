@@ -9,6 +9,7 @@ import { barSeconds, clock, keyOf, planSeconds, sectionViews, songGrid, songKeys
 import type { JumpFade, Reason } from '../lib/performPlan';
 import { livePad, songBpm, wayIn } from './Sets';
 import { isIOS, mobile } from '../platform';
+import { WordsStrip } from './WordsStrip';
 
 const ios = isIOS();
 
@@ -435,6 +436,7 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
           ) : left ? (
             <PadPanel left={left} next={next} snap={snap} mode={prefs.mode} onMode={mode => savePrefs({ mode })} onPad={pickPad} onPadOff={padMoves.off} way={way} picked={wayIn(set, left, next).picked} opener={firstPad(left, next)} step={walkStep.current} have={have} />
           ) : null}
+          {session && !finished && <WordsStrip session={session} song={song} />}
           {ios && !finished && <div className="mt-4">{fadeSwitch}</div>}
         </main>
         <aside className="px-5 py-6 max-lg:col-span-2 max-lg:border-t max-lg:border-line ios:max-lg:col-span-1 ios:max-md:px-4 ios:md:border-t-0">

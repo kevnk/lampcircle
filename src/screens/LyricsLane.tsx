@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import type { Song } from '../types';
 import { Menu, MenuItem } from '../ui';
+import { loadLyricsPrefs } from '../lib/lyricsDisplay';
 import { applyBarsToBlock, laneSlides, makeBlank, mergeNext, moveSlideEdge, placementOf, setSlideText, slideLines, splitSlide, splitText, type LaneSlide } from '../lib/lyricsEdit';
 import { sectionViews, songGrid } from '../lib/songMap';
 
@@ -19,7 +20,8 @@ export function LyricsLane({ song, edit, onSeek, onPick }: { song: Song; edit: L
   const lane = useRef<HTMLDivElement>(null);
   const dragged = useRef(false);
   const [picked, setPicked] = useState<Picked | null>(null);
-  const slides = laneSlides(song);
+  const [defaults] = useState(loadLyricsPrefs);
+  const slides = laneSlides(song, defaults);
   const placement = placementOf(song);
   const duration = song.duration || 1;
   const pct = (t: number) => `${(t / duration) * 100}%`;
