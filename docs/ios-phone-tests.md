@@ -101,6 +101,21 @@ Tap the Settings tab, at the right of the bottom bar. The sheet should fill the 
 4. **Feedback.** Tap **Send feedback**, write a test note and tap Send. The keyboard should not hide the note. A test build without the relay address should say feedback isn't set up.
 5. **The rest.** About should show this build's version. Turn a Privacy box off, close the sheet and reopen it. The box should still be off. Set **When Lamp Circle opens** to Start at the Library, then force-quit and reopen. It should open on Library.
 
+### 13. Haptics
+
+Use the phone's speaker first, in a quiet room, with the phone in your hand. Pick a section with a clear downbeat. This takes about 3 minutes.
+
+1. **Queue and cancel.** During a song, tap a section pad. You should feel one small tick at the tap. Tap the same pad, or Cancel, and you should feel another.
+2. **The landing.** Queue a section and wait. You should feel one light tick right on its downbeat, with no tick on the sections you didn't queue. Do this 5 times, with different sections.
+3. **Off.** Turn off **Haptics** in Settings, then repeat steps 1 and 2. You should feel nothing. Turn it back on.
+4. **Pause.** Queue a section, then pause before it lands. You should feel no landing tick while it's paused. Resume, and the landing should tick once.
+5. **The background.** Queue a section, then lock the phone before it lands. You should feel nothing. Unlock it after the landing, and you should feel no stray tick.
+6. **Bluetooth and the sound desk.** If you use either, repeat step 2 with it. Report which one you used and whether the tick matches what you hear.
+
+If nothing ticks at all, check Settings > Sounds & Haptics > System Haptics, and try with Low Power Mode off.
+
+If the landing tick is consistently early or late, report which and about how much. `TICK_LAG` in `src/lib/haptics.ts` moves it, and its value is only a starting guess. Report it too if the tick at the tap feels late, because that one doesn't wake the Taptic Engine ahead of time.
+
 ## Why a tap in Files doesn't open the app
 
 Opening in place would need `LSSupportsOpeningDocumentsInPlace = YES`, and that can't work with Tauri's current window library, tao 0.37:

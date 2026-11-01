@@ -374,6 +374,7 @@ pub fn run() {
             downloads::saved_captions,
             ios::pick_import_files,
             ios::set_keep_awake,
+            ios::haptic,
             #[cfg(all(debug_assertions, target_os = "ios"))]
             ios::take_dev_seed,
         ])

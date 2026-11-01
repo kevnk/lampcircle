@@ -74,6 +74,7 @@ let audioSession: Promise<void> = Promise.resolve();
 export const mobile: Mobile = {
   pickImportFiles: async () => unpack(await invoke<ArrayBuffer>('pick_import_files')).files,
   setKeepAwake: enabled => invoke<void>('set_keep_awake', { enabled }),
+  haptic: kind => invoke<void>('haptic', { kind }),
   setAudioPlaying(playing) {
     // Web Audio may run under WebKit's own session and not the app's, so ask WebKit for the same thing. iOS 16.4 and later.
     const webkit = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;

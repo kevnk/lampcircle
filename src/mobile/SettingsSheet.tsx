@@ -49,6 +49,14 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
                 </div>
               </Row>
               <WhenItOpens settings={settings} save={save} />
+              {/* `switch` makes this iOS's own toggle from iOS 17.4. Before that it's a checkbox. */}
+              <label className="flex min-h-11 items-center justify-between gap-4">
+                <span className="flex flex-col">
+                  Haptics
+                  <Hint>A light tick in Perform when a section you queued comes in, and when you queue or cancel one.</Hint>
+                </span>
+                <input type="checkbox" role="switch" {...{ switch: '' }} className="shrink-0" checked={settings.hapticsEnabled} onChange={event => void save({ hapticsEnabled: event.target.checked })} />
+              </label>
             </Group>
             <Privacy settings={settings} save={save} />
           </fieldset>

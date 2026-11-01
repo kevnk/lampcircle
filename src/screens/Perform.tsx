@@ -9,6 +9,7 @@ import { barSeconds, clock, keyOf, planSeconds, sectionViews, songGrid, songKeys
 import type { JumpFade, Reason } from '../lib/performPlan';
 import { livePad, songBpm, wayIn } from './Sets';
 import { isIOS, mobile } from '../platform';
+import { useHaptics } from '../mobile/useHaptics';
 
 const ios = isIOS();
 
@@ -126,6 +127,7 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
 
   const session = sessionRef.current;
   const snap: Snapshot | null = session?.snapshot() ?? null;
+  useHaptics(session, snap);
   const have = new Set(pads.map(pad => pad.tonic));
   const isSong = current % 2 === 0;
   const song = isSong ? items[songIndex] : undefined;

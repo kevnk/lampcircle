@@ -1,7 +1,7 @@
-//! The iPhone and iPad side: the audio session, keeping the screen on, songs from the Files app,
+//! The iPhone and iPad side: the audio session, keeping the screen on, haptics, songs from the Files app,
 //! and a debug-only seed for simulator screenshots. Library and Perform call these only on iOS.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 #[cfg(any(test, target_os = "ios"))]
 use std::{
     path::{Path, PathBuf},
@@ -100,6 +100,73 @@ pub fn set_keep_awake(app: AppHandle, enabled: bool) -> Result<()> {
     #[cfg(not(target_os = "ios"))]
     let _ = (app, enabled);
     Ok(())
+}
+
+/// What the page asks the Taptic Engine for. The names match HapticKind in src/lib/haptics.ts.
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Haptic {
+    /// Wakes the engine for a landing about to come, so its tick is on time.
+    Prepare,
+    Landing,
+    Selection,
+}
+
+/// A tick, if the app is in front. Nothing to do on the Mac.
+#[tauri::command]
+pub fn haptic(app: AppHandle, kind: Haptic) -> Result<()> {
+    #[cfg(target_os = "ios")]
+    app.run_on_main_thread(move || {
+        if let Some(mtm) = objc2::MainThreadMarker::new() {
+            haptics::play(mtm, kind);
+        }
+    })?;
+    #[cfg(not(target_os = "ios"))]
+    let _ = (app, kind);
+    Ok(())
+}
+
+#[cfg(target_os = "ios")]
+mod haptics {
+    use std::cell::OnceCell;
+
+    use objc2::rc::Retained;
+    use objc2::{MainThreadMarker, MainThreadOnly};
+    use objc2_ui_kit::{
+        UIApplication, UIApplicationState, UIImpactFeedbackGenerator, UIImpactFeedbackStyle,
+        UISelectionFeedbackGenerator,
+    };
+
+    use super::Haptic;
+
+    // They stay for the app's life, on the main thread: preparing only helps the generator that then plays.
+    thread_local! {
+        static LANDING: OnceCell<Retained<UIImpactFeedbackGenerator>> = const { OnceCell::new() };
+        static SELECTION: OnceCell<Retained<UISelectionFeedbackGenerator>> = const { OnceCell::new() };
+    }
+
+    pub fn play(mtm: MainThreadMarker, kind: Haptic) {
+        // WebKit can be late to say the app has left the front, so ask iOS itself.
+        if UIApplication::sharedApplication(mtm).applicationState() != UIApplicationState::Active {
+            return;
+        }
+        // The newer way to choose a style needs iOS 17.5, and the app runs from iOS 16.
+        #[allow(deprecated)]
+        let light = || {
+            UIImpactFeedbackGenerator::initWithStyle(
+                UIImpactFeedbackGenerator::alloc(mtm),
+                UIImpactFeedbackStyle::Light,
+            )
+        };
+        match kind {
+            Haptic::Prepare => LANDING.with(|cell| cell.get_or_init(light).prepare()),
+            Haptic::Landing => LANDING.with(|cell| cell.get_or_init(light).impactOccurred()),
+            Haptic::Selection => SELECTION.with(|cell| {
+                cell.get_or_init(|| UISelectionFeedbackGenerator::new(mtm))
+                    .selectionChanged()
+            }),
+        }
+    }
 }
 
 /// Debug builds only: hands over every file in <app data>/dev-seed once, for simulator screenshots,
@@ -379,7 +446,16 @@ pub fn setup(app: &tauri::App) {
 
 #[cfg(test)]
 mod tests {
-    use super::{frame, take_from_inbox};
+    use super::{frame, take_from_inbox, Haptic};
+
+    #[test]
+    fn reads_the_names_the_page_sends() {
+        let read = serde_json::from_str::<Haptic>;
+        assert!(matches!(read(r#""prepare""#), Ok(Haptic::Prepare)));
+        assert!(matches!(read(r#""landing""#), Ok(Haptic::Landing)));
+        assert!(matches!(read(r#""selection""#), Ok(Haptic::Selection)));
+        assert!(read(r#""buzz""#).is_err());
+    }
 
     #[test]
     fn takes_each_djw_from_the_inbox_once() {

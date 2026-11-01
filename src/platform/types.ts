@@ -1,4 +1,5 @@
 import type { DjwMap } from '../lib/djw';
+import type { HapticKind } from '../lib/haptics';
 import type { CaptionTrack } from '../lib/lyricsFetch';
 
 /** The Mac app's preferences, from the TF Mac app template. The theme stays in theme.ts, where the web app keeps it too. */
@@ -11,6 +12,8 @@ export type Settings = {
   openAtLaunch: 'last-session' | 'nothing';
   /** Open at login through the Tauri autostart plugin's macOS LaunchAgent. */
   openAtLogin: boolean;
+  /** Perform's ticks on iPhone and iPad. */
+  hapticsEnabled: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -18,6 +21,7 @@ export const DEFAULT_SETTINGS: Settings = {
   crashReportingEnabled: false,
   openAtLaunch: 'last-session',
   openAtLogin: false,
+  hapticsEnabled: true,
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -33,6 +37,7 @@ export function normalizeSettings(value: unknown): Settings {
     crashReportingEnabled: flag('crashReportingEnabled'),
     openAtLaunch: stored.openAtLaunch === 'nothing' ? 'nothing' : 'last-session',
     openAtLogin: flag('openAtLogin'),
+    hapticsEnabled: flag('hapticsEnabled'),
   };
 }
 
@@ -117,6 +122,8 @@ export type Mobile = {
   pickImportFiles(): Promise<File[]>;
   /** Keeps the screen on, for Perform. */
   setKeepAwake(enabled: boolean): Promise<void>;
+  /** A tick from the Taptic Engine, if the app is in front. */
+  haptic(kind: HapticKind): Promise<void>;
   /** Takes the audio session from other apps while Lamp Circle plays, and gives it back after. Done when iOS has answered. */
   setAudioPlaying(playing: boolean): Promise<void>;
   /** The headphones or a cable came out. */

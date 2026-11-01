@@ -1168,6 +1168,172 @@ const player = (paused = false) => ({ paused, pauses: 0, pause() { this.pauses++
   same('a packed library survives the trip', Buffer.from(await back.audio[0][1].arrayBuffer()).equals(Buffer.from(bytes)), true);
 }
 
+// Haptics: when Perform's ticks go, on a stand-in audio clock and timers.
+{
+  const haptics = await import('../src/lib/haptics.ts');
+  const { normalizeSettings } = await import('../src/platform/types.ts');
+  const LAG = haptics.TICK_LAG;
+  const A = { idx: 2, at: 110 };
+  const B = { idx: 3, at: 110 };
+
+  const stage = (options: { latency?: number } = {}) => {
+    let t = 100;
+    const world = { ready: true, latency: options.latency ?? 0, fired: [] as Array<[string, number]>, armed: 0 };
+    let timers: Array<{ due: number; run: () => void }> = [];
+    const ticks = haptics.hapticTicks({
+      clock: () => t,
+      latency: () => world.latency,
+      ready: () => world.ready,
+      fire: kind => world.fired.push([kind, r3(t)]),
+      schedule: (run, seconds) => {
+        const timer = { due: t + seconds, run };
+        timers.push(timer);
+        world.armed++;
+        return () => {
+          timers = timers.filter(item => item !== timer);
+        };
+      },
+    });
+    /** Moves the clock on, running each timer when it comes due. */
+    const to = (end: number) => {
+      for (;;) {
+        const due = timers.filter(timer => timer.due <= end).sort((a, b) => a.due - b.due)[0];
+        if (!due) break;
+        timers = timers.filter(timer => timer !== due);
+        t = Math.max(t, due.due);
+        due.run();
+      }
+      t = end;
+    };
+    /** Moves the clock with every timer asleep, as in the background. The timers run late, on waking. */
+    const sleep = (end: number) => {
+      t = end;
+      const late = timers;
+      timers = [];
+      late.forEach(timer => timer.run());
+    };
+    return { ...world, world, ticks, to, sleep, kinds: () => world.fired.map(([kind]) => kind) };
+  };
+
+  const queuing = stage();
+  queuing.ticks.update(A, false);
+  same('queuing a section ticks at the tap', queuing.world.fired, [['selection', 100]]);
+  const armed = queuing.world.armed;
+  queuing.to(105);
+  queuing.ticks.update(A, false);
+  queuing.ticks.update(A, false);
+  same('the same queue on later frames ticks no more and sets no new timer', [queuing.kinds(), queuing.world.armed], [['selection'], armed]);
+  queuing.to(115);
+  same('it wakes the engine a second ahead, then ticks ahead of the landing by the lag', queuing.world.fired, [['selection', 100], ['prepare', r3(110 - LAG - 1)], ['landing', r3(110 - LAG)]]);
+  queuing.ticks.update(null, false);
+  same('the queue emptying at the landing adds no tick', queuing.kinds(), ['selection', 'prepare', 'landing']);
+
+  const cancelling = stage();
+  cancelling.ticks.update(A, false);
+  cancelling.to(105);
+  cancelling.ticks.update(null, false);
+  cancelling.to(115);
+  same('cancelling ticks, and the landing never comes', cancelling.world.fired, [['selection', 100], ['selection', 105]]);
+
+  const switching = stage();
+  switching.ticks.update(A, false);
+  switching.to(105);
+  switching.ticks.update(B, false);
+  switching.to(115);
+  same('picking another section for the same bar ticks, with one landing', switching.kinds(), ['selection', 'selection', 'prepare', 'landing']);
+
+  const otherSong = stage();
+  otherSong.ticks.update(A, false);
+  otherSong.to(105);
+  otherSong.ticks.update({ idx: 2, at: 108 }, false);
+  otherSong.to(115);
+  same('the same section number on another bar is a new pick, as in another song', otherSong.world.fired, [['selection', 100], ['selection', 105], ['prepare', r3(108 - LAG - 1)], ['landing', r3(108 - LAG)]]);
+
+  const close = stage();
+  close.ticks.update({ idx: 1, at: 100.5 }, false);
+  close.to(101);
+  same('a landing under a second away wakes the engine at once', close.world.fired, [['selection', 100], ['prepare', 100], ['landing', r3(100.5 - LAG)]]);
+
+  const pausing = stage();
+  pausing.ticks.update(A, false);
+  pausing.to(105);
+  pausing.ticks.update(A, true);
+  pausing.to(115);
+  same('no landing tick while paused', pausing.kinds(), ['selection']);
+
+  const stopped = stage();
+  stopped.ticks.update({ idx: 2, at: 103 }, false);
+  stopped.ticks.update({ idx: 2, at: 103 }, true);
+  stopped.ticks.update({ idx: 2, at: 103 }, false);
+  stopped.to(104);
+  same('a pause taken back still gets its one landing', stopped.world.fired, [['selection', 100], ['prepare', r3(103 - LAG - 1)], ['landing', r3(103 - LAG)]]);
+
+  const again = stage();
+  again.ticks.update(A, false);
+  again.to(110 - LAG);
+  again.ticks.update(A, true);
+  again.ticks.update(A, false);
+  again.to(110 - LAG + 0.02);
+  again.ticks.update(A, false);
+  same('setting the timer again after the tick does not repeat it', again.kinds(), ['selection', 'prepare', 'landing']);
+
+  const asleep = stage();
+  asleep.ticks.update(A, false);
+  asleep.sleep(125);
+  asleep.ticks.update(null, false);
+  same('a timer that wakes long after the landing stays quiet, and so does the empty queue', asleep.kinds(), ['selection']);
+
+  const slow = stage();
+  slow.ticks.update({ idx: 1, at: 100.5 }, false);
+  slow.sleep(100.5 + 0.03);
+  same('a timer a little late still ticks', slow.kinds(), ['selection', 'prepare', 'landing']);
+
+  const off = stage();
+  off.world.ready = false;
+  off.ticks.update(A, false);
+  off.to(105);
+  off.ticks.update(null, false);
+  off.ticks.update(B, false);
+  off.to(115);
+  same('with Haptics off or the app behind, nothing fires', off.kinds(), []);
+
+  // Sound through Bluetooth arrives late, so the tick waits for it, past the moment the queue empties.
+  const wireless = stage({ latency: 0.2 });
+  wireless.ticks.update(A, false);
+  wireless.to(110.02);
+  wireless.ticks.update(null, false);
+  wireless.ticks.update(null, false);
+  wireless.to(111);
+  same('a landing keeps its timer after the queue empties', wireless.world.fired.at(-1), ['landing', r3(110 + 0.2 - LAG)]);
+
+  const arrival = stage();
+  arrival.ticks.update(A, false);
+  arrival.to(110.01);
+  arrival.ticks.update({ idx: 4, at: 118 }, false);
+  arrival.to(120);
+  same('a second pick waiting behind an arrival ticks as the arrival lands, and each lands once', arrival.kinds(), ['selection', 'prepare', 'landing', 'selection', 'prepare', 'landing']);
+
+  const finished = stage();
+  finished.ticks.update(A, false);
+  finished.ticks.stop();
+  finished.to(115);
+  same('leaving Perform calls off the landing', finished.kinds(), ['selection']);
+
+  const song = (next: object | null, arriving = false) => ({ next, arriving }) as never;
+  const landing = { idx: 3, bars: 1, beats: 4, landingCtx: 50 };
+  same('a picked section is queued', haptics.queuedSection(song({ ...landing, reason: 'pick' }), undefined), { idx: 3, at: 50 });
+  same('the section the plan goes to next is not', haptics.queuedSection(song({ ...landing, reason: 'plan' }), undefined), null);
+  same('nor is a loop on hold', haptics.queuedSection(song({ ...landing, reason: 'hold' }), undefined), null);
+  same('nothing playing, nothing queued', haptics.queuedSection(null as never, undefined), null);
+  same('a section of another song still coming in is queued', haptics.queuedSection(song(null, true), { idx: 1, reason: 'pick', landingCtx: 40 }), { idx: 1, at: 40 });
+  same('and comes ahead of a pick behind it', haptics.queuedSection(song({ ...landing, reason: 'pick' }, true), { idx: 1, reason: 'pick', landingCtx: 40 }), { idx: 1, at: 40 });
+  same('a song starting from the plan is not queued', haptics.queuedSection(song(null, true), { idx: 0, reason: 'plan', landingCtx: 40 }), null);
+
+  same('Haptics is on when the saved settings predate it', normalizeSettings({ analyticsEnabled: false }).hapticsEnabled, true);
+  same('it stays off once turned off', normalizeSettings({ hapticsEnabled: false }).hapticsEnabled, false);
+  same('a broken value turns it off', normalizeSettings({ hapticsEnabled: 'yes' }).hapticsEnabled, false);
+}
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);
