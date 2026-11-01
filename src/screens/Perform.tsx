@@ -8,7 +8,7 @@ import { KEY_NAMES, padFit, padGroups, waysIn } from '../lib/music';
 import { barSeconds, clock, keyOf, planSeconds, sectionViews, songGrid, songKeys, type SectionView } from '../lib/songMap';
 import type { JumpFade, Reason } from '../lib/performPlan';
 import { livePad, songBpm, wayIn } from './Sets';
-import { isIOS, mobile } from '../platform';
+import { isIOS, isTauri, mobile } from '../platform';
 import { WordsStrip } from './WordsStrip';
 
 const ios = isIOS();
@@ -87,13 +87,6 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
     if (sessionRef.current) Object.assign(sessionRef.current, { jumpFade: next.jumpFade, fillGaps: next.fillGaps, padCrossfade: next.crossfade });
   };
 
-  // The phone must not lock mid-song.
-  useEffect(() => {
-    if (!ios) return;
-    void mobile.setKeepAwake(true).catch(() => undefined);
-    return () => void mobile.setKeepAwake(false).catch(() => undefined);
-  }, []);
-
   useEffect(() => {
     const session = new PerformSession(padSourceFor(pads));
     sessionRef.current = session;
@@ -133,6 +126,14 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
   const left = !isSong ? items[songIndex] : undefined;
   const next = !isSong ? items[songIndex + 1] : undefined;
   const finished = current >= items.length * 2;
+  // The phone must not lock mid-song, and on the Mac display sleep would take the room's screen with it. The Mac holds
+  // this only while a set is under way, since it can reopen on this page and sit there.
+  const keepAwake = ios || (isTauri() && started && !finished);
+  useEffect(() => {
+    if (!keepAwake) return;
+    void mobile.setKeepAwake(true).catch(() => undefined);
+    return () => void mobile.setKeepAwake(false).catch(() => undefined);
+  }, [keepAwake]);
   /** The pad after the last song. Pause gives way to End set here. */
   const lastItem = current === items.length * 2 - 1;
   const endTonic = (target: Song | undefined) => keyOf(songKeys(target!)?.end)?.tonic ?? 0;

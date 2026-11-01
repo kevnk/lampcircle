@@ -52,6 +52,7 @@ These come from the template:
 - **⌘W hides the window** instead of closing it, and the music keeps playing. Click the Dock icon to bring it back. ⌘Q quits.
 - **One copy at a time.** Opening Lampcircle again brings the open window forward.
 - **Playback while hidden.** `backgroundThrottling: "disabled"` keeps Perform's timers running when the window is covered or hidden.
+- **The display stays on during a set.** From the first song until the set ends or you leave Perform, the app runs `/usr/bin/caffeinate -d -i`, so display sleep can't take the lyrics window with it.
 - **Diagnostics export.** A ZIP of the app's logs and settings, with secrets taken out. Nothing is uploaded.
 
 The template's shortcut-remapping stub is left out, since Lampcircle's keys live in the page, not the menus.
