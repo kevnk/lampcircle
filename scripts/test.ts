@@ -1524,6 +1524,69 @@ same('the display delay is saved with lead and fade: held to its range, and savi
   same('the grid check names what is on the screen', map.checks(blank({ taps: tapped })).find(check => check.id === 'grid')?.text, 'The beat grid stops at 0:06. Tap further or map the rest from the song.');
 }
 
+// Tap calibration, on made-up taps. A person hears each click a set time after it plays and taps with a little wobble.
+{
+  const cal = await import('../src/lib/tapCalibration.ts');
+  const WOBBLE = [12, -18, 7, 25, -9, -22, 15, -4, 20, -14, 3, -15];
+  const clicks = cal.clickTimes(10);
+  const scored = clicks.slice(cal.COUNT_IN);
+  const end = scored[scored.length - 1];
+  const along = (lateMs: number) => clicks.map((click, i) => click + (lateMs + WOBBLE[i % 12]) / 1000);
+  const measured = (taps: number[]) => cal.checkTaps(scored, taps);
+  const offset = (taps: number[]) => {
+    const result = measured(taps);
+    return result.ok ? result.offsetMs : result.why;
+  };
+  const from = (deltas: number[]) => deltas.map((delta, i) => scored[i] + delta / 1000);
+
+  same('16 clicks 0.75 s apart, 4 to count in', [clicks.length, r3(clicks[1] - clicks[0]), scored[0]], [16, 0.75, 13]);
+  same('taps 182 ms late measure +182 ms', measured(along(182)), { ok: true, offsetMs: 182, used: 12, spreadMs: 15 });
+  same('taps a little early measure negative', offset(along(-35)), -35);
+  same('taps on the clicks measure 0', offset(along(0)), 0);
+  same('Bluetooth 520 ms late is not mistaken for the next click', offset(along(520)), 520);
+
+  const wild = from(WOBBLE.map((wobble, i) => (i === 2 ? 450 : i === 9 ? 500 : 100 + wobble)));
+  const wildResult = measured(wild);
+  same('two wild taps are left out', wildResult.ok && [wildResult.used, Math.abs(wildResult.offsetMs - 100) <= 5], [10, true]);
+  same('with them in, the plain average would be well off', Math.abs(WOBBLE.map((wobble, i) => (i === 2 ? 450 : i === 9 ? 500 : 100 + wobble)).reduce((a, b) => a + b, 0) / 12 - 100) > 20, true);
+  const missed = measured(along(100).filter((_, i) => ![6, 11].includes(i)));
+  same('a missed click or two still measures', missed.ok && [missed.used, Math.abs(missed.offsetMs - 100) <= 5], [10, true]);
+  same('eight taps are enough', (measured(along(100).slice(8)) as { used: number }).used, 8);
+  same('seven are not', offset(along(100).slice(9)), 'few');
+  same('no taps at all', offset([]), 'few');
+  same('taps only in the count-in do not count', offset(clicks.slice(0, cal.COUNT_IN)), 'few');
+  same('wild taps in the count-in change nothing', offset([clicks[0] + 0.3, clicks[1] - 0.1, ...along(100).slice(cal.COUNT_IN)]), 100);
+  same('a double tap keeps the first', offset(along(100).flatMap(t => [t, t + 0.06])), 100);
+  same('taps all over the place are too uneven', offset(from([-100, 400, 50, 300, -50, 500, 150, 450, 0, 350, 200, 250])), 'uneven');
+  same('taps that steadily drift are too uneven, though each is near its neighbours', offset(from(Array.from({ length: 12 }, (_, i) => (i * 200) / 11))), 'uneven');
+  same('taps that jump partway through are not saved by leaving the later ones out', offset(from([0, 0, 0, 0, 0, 0, 0, 0, 200, 200, 200, 200])), 'uneven');
+
+  // Sound later than the gap between clicks: every tap still falls on some click, so only the last tap gives it away.
+  for (const late of [650, 1000, 1900, 2400]) same(`sound ${late} ms late is too late to measure, not a small offset`, offset(along(late)), 'late');
+  same('a tap past the last click asks for another try', offset([...along(0), end + 0.75]), 'late');
+  same('stopping on the last click is fine', offset(along(30)), 30);
+
+  same('what is saved comes back', cal.parseTapPrefs(JSON.stringify({ offsetMs: 182, latencyMs: 12 })), { offsetMs: 182, latencyMs: 12 });
+  same('a saved offset is kept in range', ['{"offsetMs":9999}', '{"offsetMs":-9999}'].map(saved => cal.parseTapPrefs(saved).offsetMs), [600, -150]);
+  same('missing or broken prefs mean no offset', [null, '', 'nope', 'null', '[]', '{"offsetMs":"x"}', '{"offsetMs":null}'].map(saved => cal.parseTapPrefs(saved)), Array(7).fill({ offsetMs: 0 }));
+  same('a broken latency is dropped, the offset kept', cal.parseTapPrefs('{"offsetMs":50,"latencyMs":"x"}'), { offsetMs: 50 });
+
+  same('the offset comes off a press', r3(cal.applyTapOffset(10, 250)), 9.75);
+  same('a negative offset moves it later', r3(cal.applyTapOffset(10, -40)), 10.04);
+  same('no offset leaves it alone', cal.applyTapOffset(10, 0), 10);
+  same('a press stays inside the song', [cal.applyTapOffset(0.1, 250), cal.applyTapOffset(59.99, -40, 60)], [0, 60]);
+
+  // The whole point: a late output has taps miss the attacks they were reaching for, until the measured offset comes off.
+  const result = measured(along(250));
+  const fixed = odd.map(t => snapToOnset(oddEnv, cal.applyTapOffset(t + 0.25, result.ok ? result.offsetMs : 0)) ?? NaN);
+  same('taps 250 ms late miss every click', odd.every(t => snapToOnset(oddEnv, t + 0.25) === null), true);
+  same('with the measured offset they land within 2 ms', worst(fixed, odd) < 0.002, true);
+
+  same('a different reported latency means the output may have changed', cal.outputMoved({ offsetMs: 100, latencyMs: 20 }, 220), true);
+  same('a little wander does not', [cal.outputMoved({ offsetMs: 100, latencyMs: 20 }, 40), cal.outputMoved({ offsetMs: 100, latencyMs: 20 }, 5)], [false, false]);
+  same('never calibrated, no output has changed', cal.outputMoved({ offsetMs: 0 }, 500), false);
+}
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);

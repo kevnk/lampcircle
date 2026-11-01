@@ -3,13 +3,15 @@ import { ChevronLeft, ChevronRight, MousePointer2, Pause, Play, Scissors, Undo2,
 import type { Section, SectionType, Song, Tap } from '../types';
 import { go, useStore } from '../store';
 import { Button, Card, LinkButton, Menu, MenuItem, SongHeader, StepPills, Stepper, ask, askText, beatsLabel, shadeClass, useFrame, useKeys, type StepName } from '../ui';
-import { transport } from '../audio/engine';
+import { sinceEvent, transport } from '../audio/engine';
 import { isIOS } from '../platform';
 import { KEY_NAMES, detectKey, keyName } from '../lib/music';
 import { sectionChroma, snapToOnset, type Onsets } from '../lib/analysis';
 import { onsetsOf } from '../lib/library';
+import { applyTapOffset, loadTapPrefs } from '../lib/tapCalibration';
 import { LyricsLane, type LyricsEdit } from './LyricsLane';
 import { LyricsPanel } from './LyricsPanel';
+import { TapOffset, TapPad } from './TapCalibration';
 import {
   MIN_TAPS,
   SECTION_TYPES,
@@ -69,6 +71,7 @@ export function SongTap({ song }: { song: Song }) {
   const [custom, setCustom] = useState<{ at: number; name: string } | null>(null);
   const [hint, setHint] = useState<string | null>(null);
   const [tapNote, setTapNote] = useState<string | null>(null);
+  const [tapPrefs, setTapPrefs] = useState(loadTapPrefs);
   /** Re-tapping: taps outside [start, end) are ignored, each new tap replaces the old taps before it, and playback stops at `stop`. */
   const [retap, setRetap] = useState<{ label: string; start: number; end: number; stop: number; half: number; fresh: Set<Tap> } | null>(null);
   const [tool, setTool] = useState<Tool>('select');
@@ -173,6 +176,9 @@ export function SongTap({ song }: { song: Song }) {
     setFlash(true);
     window.setTimeout(() => setFlash(false), 90);
   };
+  /** Where in the song a press belongs. Stopped, that is just the playhead. */
+  const pressedAt = (stamp?: number) =>
+    transport.playing ? applyTapOffset(transport.heard() - sinceEvent(stamp), tapPrefs.offsetMs, transport.buffer?.duration) : transport.position();
   /** `stamp` is the key or click event's time, so a busy frame does not make the tap late. */
   const tap = (one: boolean, stamp?: number) => {
     if (!loaded) return;
@@ -187,7 +193,7 @@ export function SongTap({ song }: { song: Song }) {
       setTapNote(`${ones(marked) > ones(current) ? 'That beat is a 1 now.' : 'That beat is no longer a 1.'} Backspace undoes it.`);
       return save(marked);
     }
-    const heard = transport.heard() - (stamp !== undefined ? Math.max(0, performance.now() - stamp) / 1000 : 0);
+    const heard = pressedAt(stamp);
     // A tap while it plays moves onto the drum hit or strum it was reaching for, if one is close.
     const t = (env ? snapToOnset(env, heard) : null) ?? heard;
     if (retap && (t < retap.start || t >= retap.end)) return;
@@ -198,7 +204,7 @@ export function SongTap({ song }: { song: Song }) {
     retap?.fresh.add(added);
     save({ ...current, taps: [...kept, added] });
   };
-  const mark = (type: SectionType, name?: string, at = transport.heard()) => {
+  const mark = (type: SectionType, name?: string, at = pressedAt()) => {
     const current = latest.current;
     if (songGrid(current).downbeats.length === 0) return setHint('Tap a few beats first, so the app knows where the bars are.');
     setHint(null);
@@ -364,17 +370,7 @@ export function SongTap({ song }: { song: Song }) {
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,354px)_minmax(0,1fr)]">
         <Card className="self-start p-5">
           <h2 className="mb-4 text-xl font-bold"><span className="text-amber">1</span> · Tap the beat</h2>
-          <button
-            type="button"
-            className={`w-full rounded-2xl border-2 px-3 py-7 text-center transition ${flash ? 'border-accent bg-accent-soft shadow-glow' : 'border-accent/40 bg-well hover:border-accent/70'} ios:py-12`}
-            // A touch counts as it lands, not when the finger lifts.
-            onClick={ios ? undefined : event => tap(event.shiftKey, event.timeStamp)}
-            onPointerDown={ios ? event => tap(false, event.timeStamp) : undefined}
-            disabled={!loaded}
-          >
-            <span className="block pl-[0.3em] text-4xl font-black tracking-[0.3em] text-amber">TAP</span>
-            <span className="mt-3 block whitespace-nowrap text-[13px] text-muted">{ios ? 'Tap on every beat' : 'Space on every beat · Shift+Space on beat 1'}</span>
-          </button>
+          <TapPad flash={flash} disabled={!loaded} hint={ios ? 'Tap on every beat' : 'Space on every beat · Shift+Space on beat 1'} onTap={tap} />
           {ios && (
             // There is no Shift to hold on a phone, so beat 1 has its own pad.
             <button
@@ -428,6 +424,7 @@ export function SongTap({ song }: { song: Song }) {
               ? `The app could not listen to this recording. Tap ${MIN_TAPS} beats or more, then fill the rest: it keeps the tempo of your first and last taps.`
               : `Tap ${MIN_TAPS} beats or more where the beat is clear, with ${ios ? 'Tap beat 1' : 'Shift'} on a beat 1. Then map the rest: the app follows the recording from your taps, drift and all. Gray ticks are beats the app placed.`}
           </p>
+          <TapOffset prefs={tapPrefs} playing={playing} onChange={setTapPrefs} />
         </Card>
 
         <Card className="p-5">
@@ -443,7 +440,7 @@ export function SongTap({ song }: { song: Song }) {
               </Button>
             ))}
             {custom === null ? (
-              <Button className="px-3.5" onClick={() => setCustom({ at: transport.heard(), name: '' })}>
+              <Button className="px-3.5" onClick={() => setCustom({ at: pressedAt(), name: '' })}>
                 <span className="text-xs font-bold text-amber">+</span>
                 Custom
               </Button>

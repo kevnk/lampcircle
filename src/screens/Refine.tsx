@@ -3,7 +3,7 @@ import { Play, Repeat, Square } from 'lucide-react';
 import type { JumpAt, Section, Song } from '../types';
 import { go, useStore } from '../store';
 import { Button, Card, SongHeader, StepPills, Stepper, beatsLabel, useFrame } from '../ui';
-import { PerformSession, audio, loadBuffer, now, padSourceFor, perfSong, transport } from '../audio/engine';
+import { PerformSession, loadBuffer, now, padSourceFor, perfSong, reportedLatency, transport } from '../audio/engine';
 import { SECTION_TYPES, beatPos, beatTime, bpmOf, keysText, sectionViews, songGrid, songKeys, type Grid, type SectionView } from '../lib/songMap';
 import { fadeOutSpan, leadIn, seamEnd } from '../lib/performPlan';
 import { doneSteps, focusedSection, stepNav } from './SongTap';
@@ -542,7 +542,7 @@ function useListen(song: Song, view: SectionView, before: number, after: number)
 
   const snap = mode ? (session.current?.snapshot().song ?? null) : null;
   // What the listener hears lags the audio clock by the output latency, which is large over Bluetooth.
-  const lag = snap ? (audio().ctx.baseLatency || 0) + (audio().ctx.outputLatency || 0) : 0;
+  const lag = snap ? reportedLatency() : 0;
   return {
     mode,
     repeat,
