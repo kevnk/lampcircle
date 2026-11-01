@@ -1,7 +1,7 @@
 import type { Snapshot } from '../audio/engine';
 import type { SectionLyric, Song } from '../types';
 import { LYRICS_PREFS, slideLead } from './lyricsCue';
-import { placeLyrics, withPlacement, type PlaceOptions, type Placement } from './lyricsPlace';
+import { placeLyrics, placeRuns, placeTyped, typedGroups, withPlacement, wordSections, type PlaceOptions, type Placement } from './lyricsPlace';
 import { beatPos, beatTime, nearestIndex, sectionViews, songGrid, type SectionView } from './songMap';
 
 /** One slide in the Map Song lyrics lane. */
@@ -168,6 +168,64 @@ export function placeAgain(song: Song, change: Partial<Pick<PlaceOptions, 'offse
   const placing = { ...placingOf(song), ...(change.linesPerSlide === undefined ? {} : { linesPerSlide: change.linesPerSlide }) };
   const placement = placeLyrics(song, song.timedLyrics, { source, offset: change.offset ?? song.lyrics?.offset ?? 0, ...placing });
   return { song: { ...withPlacement(song, placement), lyricsPlacing: placing }, placement };
+}
+
+/** Words someone typed, with no found lines behind them to place again. */
+export function isTyped(song: Song): boolean {
+  return song.lyrics?.source === 'manual' && !song.timedLyrics?.length;
+}
+
+/**
+ * The words the slides show now, for the text box: each section's lines under its name, so saving leaves them on it.
+ * Sung sections with no words get their name too, ready to type under. A song with no words at all gives ''.
+ */
+export function lyricsText(song: Song): string {
+  const slides = laneSlides(song);
+  if (!slides.some(slide => slide.lines.length)) return '';
+  const views = sectionViews(song);
+  const sung = wordSections(views);
+  return views
+    .flatMap(view => {
+      const lines = slides.filter(slide => slide.sectionId === view.section.id).flatMap(slide => slide.lines);
+      return lines.length || sung.includes(view) ? [[`[${view.name}]`, ...lines].join('\n')] : [];
+    })
+    .join('\n\n');
+}
+
+function withTyped(song: Song, placement: Placement, linesPerSlide: number): Song {
+  // Found lines left behind would come back over the typed words on Place again. Undo restores the whole song.
+  const { timedLyrics: _found, ...rest } = song;
+  return { ...withPlacement(rest, placement), lyricsPlacing: { linesPerSlide, autoOffset: false } };
+}
+
+/**
+ * Saves typed text as the song's words, replacing its slides. The same song when there are no words or no sections to
+ * put them on, or when the text says what the box already showed, so slide edits only go when the words change.
+ */
+export function typeWords(song: Song, text: string): Song {
+  const groups = typedGroups(text);
+  if (!groups.length || !sectionViews(song).length || JSON.stringify(groups) === JSON.stringify(typedGroups(lyricsText(song)))) return song;
+  const { linesPerSlide } = placingOf(song);
+  return withTyped(song, placeTyped(song, text, linesPerSlide), linesPerSlide);
+}
+
+/**
+ * Place again for the panel. Typed words have no times, so they go again from the lines each section shows now, keeping
+ * word fixes. Those lines aren't read back as text, so one that looks like a heading stays a line.
+ */
+export function placeWordsAgain(song: Song, linesPerSlide?: number): Song {
+  if (!isTyped(song)) return placeAgain(song, linesPerSlide === undefined ? {} : { linesPerSlide })?.song ?? song;
+  const slides = laneSlides(song);
+  if (!slides.some(slide => slide.lines.length)) return song;
+  const lines = linesPerSlide ?? placingOf(song).linesPerSlide;
+  const runs = new Map(sectionViews(song).map(view => [view, [slides.filter(slide => slide.sectionId === view.section.id).flatMap(slide => slide.lines)]]));
+  return withTyped(song, placeRuns(song, runs, lines), lines);
+}
+
+/** Names of the sung sections with no words on them: blanks to check after pasting text with no headings. */
+export function sectionsWithoutWords(song: Song): string[] {
+  const shown = new Set(laneSlides(song).filter(slide => slide.lines.length).map(slide => slide.sectionId));
+  return wordSections(sectionViews(song)).filter(view => !shown.has(view.section.id)).map(view => view.name);
 }
 
 const placements = new WeakMap<Song, Placement | null>();

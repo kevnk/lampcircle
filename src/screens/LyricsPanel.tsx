@@ -6,7 +6,8 @@ import { transport } from '../audio/engine';
 import { findLyrics, withFoundLyrics } from '../lib/lyricsFetch';
 import { lyricsCue, type DisplayCue, type LyricsPrefs } from '../lib/lyricsCue';
 import { WORDS_START, loadLyricsPrefs, tickWords, type ScreenFaces } from '../lib/lyricsDisplay';
-import { laneSlides, placeAgain, placementOf, placingOf, previewSnapshot } from '../lib/lyricsEdit';
+import { isTyped, laneSlides, lyricsText, placeAgain, placeWordsAgain, placementOf, placingOf, previewSnapshot, sectionsWithoutWords, typeWords } from '../lib/lyricsEdit';
+import { typedGroups, wordSections } from '../lib/lyricsPlace';
 import { sectionViews, songGrid } from '../lib/songMap';
 import type { LyricsEdit } from './LyricsLane';
 
@@ -20,13 +21,18 @@ const SOURCES: Record<string, string> = {
 };
 
 /**
- * The Lyrics card under the track: where the words came from, Find lyrics and Place again, the nudge, lines per
- * slide, lead and fade, and a preview of the screen. With no `edit` (the phone) it only shows the status and preview.
+ * The Lyrics card under the track: where the words came from, Find lyrics and Place again, a box to type or paste the
+ * words, the nudge, lines per slide, lead and fade, and a preview of the screen. With no `edit` (the phone) it only
+ * shows the status and preview.
  */
 export function LyricsPanel({ song, edit }: { song: Song; edit: LyricsEdit | null }) {
   const [open, setOpen] = useState(() => Boolean(song.lyrics));
   const [finding, setFinding] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  /** Find lyrics came back empty, so typing is the thing to do next. */
+  const [missed, setMissed] = useState(false);
+  /** The text box's words while it's open. */
+  const [draft, setDraft] = useState<string | null>(null);
   const [defaults] = useState(loadLyricsPrefs);
   /** A slider being dragged: only its first change is an undo step. */
   const sliding = useRef(false);
@@ -37,8 +43,12 @@ export function LyricsPanel({ song, edit }: { song: Song; edit: LyricsEdit | nul
   const placing = placingOf(song);
   const marked = slides.filter(slide => slide.check).length;
   const unplaced = placement?.unplaced.length ?? 0;
-  const canFind = edit !== null && sectionViews(song).length > 0 && !finding;
-  const canPlace = edit !== null && Boolean(song.timedLyrics?.length && source);
+  const hasSections = sectionViews(song).length > 0;
+  const hasWords = slides.some(slide => slide.lines.length);
+  const typed = isTyped(song);
+  const canFind = edit !== null && hasSections && !finding && draft === null;
+  const canPlace = edit !== null && (typed ? hasWords : Boolean(song.timedLyrics?.length && source));
+  const sung = wordSections(sectionViews(song)).map(view => view.name);
   const status = [
     source ? (SOURCES[source] ?? (source.startsWith('lrclib:') ? 'Words from LRCLIB' : `Words from ${source}`)) : 'No lyrics yet',
     slides.length ? `${count(slides.filter(slide => slide.lines.length).length, 'slide')} in ${count(new Set(slides.map(slide => slide.sectionId)).size, 'section')}` : source ? 'not placed yet' : null,
@@ -58,14 +68,26 @@ export function LyricsPanel({ song, edit }: { song: Song; edit: LyricsEdit | nul
   const find = async () => {
     setFinding(true);
     setNote(null);
+    setMissed(false);
     const found = await findLyrics(song);
     setFinding(false);
-    if (!found) return setNote('No lyrics found: the video has no captions and LRCLIB has nothing for this title, or there is no internet right now.');
+    if (!found) {
+      setMissed(true);
+      return setNote('No lyrics found: the video has no captions and LRCLIB has nothing for this title, or there is no internet right now. You can paste or type the words instead.');
+    }
     setNote(found.note ?? null);
     // A record timed to a recording of another length gets its offset estimated, and Place again keeps doing that.
     const autoOffset = found.kind === 'lrc' && Boolean(found.note);
     edit?.(latest => placeAgain({ ...withFoundLyrics(latest, found), lyricsPlacing: { ...placingOf(latest), autoOffset } }, { offset: 0 })?.song ?? latest);
     setOpen(true);
+  };
+  const saveDraft = () => {
+    const text = draft ?? '';
+    const changed = edit?.(latest => typeWords(latest, text));
+    const blanks = changed ? sectionsWithoutWords(typeWords(song, text)) : [];
+    setNote(blanks.length ? `No words on ${blanks.join(', ')}. If some landed on the wrong section, write its name above them, like [${blanks[0]}].` : null);
+    setMissed(false);
+    setDraft(null);
   };
 
   return (
@@ -82,17 +104,42 @@ export function LyricsPanel({ song, edit }: { song: Song; edit: LyricsEdit | nul
             {edit ? (
               <>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button tone={source ? 'outline' : 'primary'} disabled={!canFind} onClick={() => void find()} title={canFind || finding ? 'Looks in the video captions, then LRCLIB, and places what it finds. Undo brings back what was here.' : 'Mark sections first'}>
+                  <Button tone={source || missed ? 'outline' : 'primary'} disabled={!canFind} onClick={() => void find()} title={draft !== null ? 'Save or cancel the text box first' : canFind || finding ? 'Looks in the video captions, then LRCLIB, and places what it finds. Undo brings back what was here.' : 'Mark sections first'}>
                     {finding ? 'Finding…' : 'Find lyrics'}
                   </Button>
-                  <Button disabled={!canPlace} onClick={() => edit(latest => placeAgain(latest)?.song ?? latest)} title="Places the found lines on the sections again, replacing your slide edits. Undo brings them back.">
+                  <Button disabled={!canPlace} onClick={() => edit(latest => placeWordsAgain(latest))} title="Places the words on the sections again, replacing your slide edits. Undo brings them back.">
                     Place again
                   </Button>
+                  <Button tone={missed && !hasWords ? 'primary' : 'outline'} disabled={!hasSections || finding} aria-expanded={draft !== null} onClick={() => setDraft(now => now ?? lyricsText(song))} title={hasSections ? 'Type or paste the words, and they go on the sections with no timing to follow.' : 'Mark sections first'}>
+                    {hasWords ? 'Edit words' : 'Paste or type words'}
+                  </Button>
                 </div>
-                <Slider label="Nudge" value={lyrics?.offset ?? 0} min={-2} max={2} step={0.05} text={`${(lyrics?.offset ?? 0) > 0 ? '+' : ''}${(lyrics?.offset ?? 0).toFixed(2)} s`} disabled={!canPlace} onChange={onSlide((latest, offset) => placeAgain(latest, { offset })?.song ?? latest)} {...letGo}>
-                  Moves every line earlier or later, then places them again, replacing your slide edits. For words that come in late or early everywhere.
+                {draft !== null && (
+                  <div>
+                    <textarea
+                      autoFocus
+                      aria-label="The song's words, one line per lyric line"
+                      value={draft}
+                      rows={12}
+                      className="block w-full resize-y rounded-lg border border-edge bg-well px-3 py-2"
+                      onChange={event => setDraft(event.target.value)}
+                    />
+                    <p className="mt-1 text-xs text-muted">
+                      One line per lyric line, a blank line between groups. Groups fill the sections in order: {sung.join(', ')}. To put words on one section, write its name above them, like [{sung[0]}].
+                    </p>
+                    {hasWords && <p className="mt-1 text-xs text-amber">Saving places these words again, replacing your slide edits. Undo brings them back.</p>}
+                    <div className="mt-2 flex gap-2">
+                      <Button tone="primary" disabled={!typedGroups(draft).length} onClick={saveDraft}>
+                        Save and place
+                      </Button>
+                      <Button onClick={() => setDraft(null)}>Cancel</Button>
+                    </div>
+                  </div>
+                )}
+                <Slider label="Nudge" value={lyrics?.offset ?? 0} min={-2} max={2} step={0.05} text={`${(lyrics?.offset ?? 0) > 0 ? '+' : ''}${(lyrics?.offset ?? 0).toFixed(2)} s`} disabled={!canPlace || typed} onChange={onSlide((latest, offset) => placeAgain(latest, { offset })?.song ?? latest)} {...letGo}>
+                  {typed ? "Typed words have no timing to move. Drag a slide's left edge in the lane instead." : 'Moves every line earlier or later, then places them again, replacing your slide edits. For words that come in late or early everywhere.'}
                 </Slider>
-                <div title="Places the found lines again with this many on a slide, replacing your slide edits. Undo brings them back.">
+                <div title="Places the words again with this many on a slide, replacing your slide edits. Undo brings them back.">
                   <p className="mb-1.5 font-medium">Lines on a slide</p>
                   <div className="inline-flex rounded-full border border-line p-1" role="group" aria-label="Lines on a slide">
                     {[1, 2, 3, 4].map(count => (
@@ -102,7 +149,7 @@ export function LyricsPanel({ song, edit }: { song: Song; edit: LyricsEdit | nul
                         aria-pressed={placing.linesPerSlide === count}
                         disabled={!canPlace}
                         className={`rounded-full px-3.5 py-1 tabular disabled:text-faint ${placing.linesPerSlide === count ? 'bg-accent-soft text-amber ring-1 ring-inset ring-accent/50' : 'text-muted hover:bg-raised hover:text-ink'}`}
-                        onClick={() => edit(latest => placeAgain(latest, { linesPerSlide: count })?.song ?? latest)}
+                        onClick={() => edit(latest => placeWordsAgain(latest, count))}
                       >
                         {count}
                       </button>

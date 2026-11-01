@@ -180,7 +180,7 @@ export function parseLrc(text: string, duration?: number): TimedLine[] {
 }
 
 /** Caption noise out: [Music]-style tags, (music) notes and ♪ symbols. */
-function cleanText(text: string): string {
+export function cleanText(text: string): string {
   return text
     .replace(/\[[^\]]*\]/g, ' ')
     .replace(/\([^)]*\b(music|applause|instrumental|cheering|laughter)\b[^)]*\)/gi, ' ')

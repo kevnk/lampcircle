@@ -1460,6 +1460,148 @@ same('going back to the song that just ended counts as new, so Blank from the pa
   ['a', wordsCue],
 ]), [['words', 'Verse a'], ['blank', '-'], ['words', 'Verse a']]);
 
+// Words typed or pasted into the Lyrics panel, placed with no times. 120 BPM in 4/4. Words are made up.
+{
+  const fullSong = barSong([['intro', 0, 0], ['verse', 2], ['chorus', 10], ['verse', 14], ['chorus', 22], ['instrumental', 26], ['bridge', 30], ['chorus', 34]], 38);
+  /** Each section with words: its slides, lines joined by '/', slides by ' | '. */
+  const shown = (song: PlacedSong) =>
+    Object.fromEntries(map.sectionViews(song).filter(v => v.section.lyric).map(v => [v.name, song.lyrics!.blocks[v.section.lyric!.block].map(s => s.join('/')).join(' | ')]));
+  const barsOf = (song: PlacedSong) => Object.fromEntries(map.sectionViews(song).filter(v => v.section.lyric).map(v => [v.name, v.section.lyric!.slideBars]));
+  const blockOf = (song: PlacedSong) => Object.fromEntries(map.sectionViews(song).filter(v => v.section.lyric).map(v => [v.name, v.section.lyric!.block]));
+  const typed = (song: PlacedSong, text: string) => lyricsEdit.typeWords(song, text);
+
+  same('typed text: any line ending, a blank line, a lone dash or a heading ends a group; headings never reach the screen; a line that only starts like one stays', place.typedGroups(
+    '  One \r\nTwo\r\n\r\n\r\n[Chorus]\n\nThree\nVerse 2:\nFour\n(Bridge)\nFive\n-\nSix\nChorus (x2)\nBridge over the water\n[Music]\n♪ Seven ♪ here\n',
+  ), [
+    { heading: null, lines: ['One', 'Two'] },
+    { heading: 'Chorus', lines: ['Three'] },
+    { heading: 'Verse 2', lines: ['Four'] },
+    { heading: 'Bridge', lines: ['Five'] },
+    { heading: null, lines: ['Six'] },
+    { heading: 'Chorus', lines: ['Bridge over the water'] },
+    { heading: 'Music', lines: ['Seven here'] },
+  ]);
+  same('typed text: a long line splits as found lines do, and nothing to show is no groups', [
+    place.typedGroups('Alpha beta gamma delta, epsilon zeta eta theta iota'),
+    place.typedGroups(' \n\n-\n[Chorus]\n'),
+  ], [[{ heading: null, lines: ['Alpha beta gamma delta,', 'epsilon zeta eta theta iota'] }], []]);
+
+  const sheet = typed(fullSong, 'a1\na2\na3\na4\n\nb1\nb2\n\nc1\nc2\nc3\nc4\n\nb1\nb2\n\nd1\nd2\n\nb1\nb2');
+  same('one group per section: in order, past the intro and the instrumental, the slides evenly on the bars', [shown(sheet), barsOf(sheet)], [
+    { 'Verse 1': 'a1/a2 | a3/a4', 'Chorus 1': 'b1/b2', 'Verse 2': 'c1/c2 | c3/c4', 'Chorus 2': 'b1/b2', Bridge: 'd1/d2', 'Chorus 3': 'b1/b2' },
+    { 'Verse 1': [0, 4], 'Chorus 1': [0], 'Verse 2': [0, 4], 'Chorus 2': [0], Bridge: [0], 'Chorus 3': [0] },
+  ]);
+  same('a chorus typed three times shares one block; the verses, with other words, do not', blockOf(sheet), {
+    'Verse 1': 'verse-1', 'Chorus 1': 'chorus', 'Verse 2': 'verse-2', 'Chorus 2': 'chorus', Bridge: 'bridge', 'Chorus 3': 'chorus',
+  });
+
+  const shortSong = barSong([['verse', 0], ['chorus', 8], ['verse', 12]], 20);
+  const allLines = Array.from({ length: 20 }, (_, i) => `L${i + 1}`);
+  const spread = typed(shortSong, allLines.join('\n'));
+  same('no blank lines at all: the lines spread over the sections by their bars, each once and in order', [shown(spread), barsOf(spread), Object.values(spread.lyrics!.blocks).flat(2)], [
+    { 'Verse 1': 'L1/L2 | L3/L4 | L5/L6 | L7/L8', Chorus: 'L9/L10 | L11/L12', 'Verse 2': 'L13/L14 | L15/L16 | L17/L18 | L19/L20' },
+    { 'Verse 1': [0, 2, 4, 6], Chorus: [0, 2], 'Verse 2': [0, 2, 4, 6] },
+    allLines,
+  ]);
+
+  const stanzas = typed({ ...barSong([['verse', 0], ['chorus', 16]], 24), lyricsPlacing: { linesPerSlide: 4, autoOffset: false } }, 'a\nb\nc\nd\n\ne\nf\ng\nh\n\ni\nj\nk\nl');
+  same('more groups than sections: groups stay whole, the longer section takes more, and a group break starts a slide', [shown(stanzas), barsOf(stanzas)], [
+    { Verse: 'a/b/c/d | e/f/g/h', Chorus: 'i/j/k/l' },
+    { Verse: [0, 8], Chorus: [0] },
+  ]);
+  same('fewer groups than sections: in order, and the sections left over stay blank rather than guess', [shown(typed(shortSong, 'a\n\nb')), lyricsEdit.sectionsWithoutWords(typed(shortSong, 'a\n\nb'))], [
+    { 'Verse 1': 'a', Chorus: 'b' },
+    ['Verse 2'],
+  ]);
+
+  const headed = typed(fullSong, 'Verse 1\na1\na2\n\nChorus\nb1\nb2\n\nVerse 2\nc1\nc2\n\n[Bridge]\nd1\nd2\n\n[Outro]\ne1');
+  same('headings send words to their sections; a chorus named once fills every chorus; words under a heading the song lacks stay with the section above', [shown(headed), blockOf(headed)['Chorus 3']], [
+    { 'Verse 1': 'a1/a2', 'Chorus 1': 'b1/b2', 'Verse 2': 'c1/c2', 'Chorus 2': 'b1/b2', Bridge: 'd1/d2 | e1', 'Chorus 3': 'b1/b2' },
+    'chorus',
+  ]);
+  same('a chorus heading used each time fills the choruses in order, and a heading can put words in the intro', shown(typed(fullSong, '[Intro]\nz\n[Chorus]\nb\n[Chorus]\nbb\n[Chorus]\nbbb')), {
+    Intro: 'z', 'Chorus 1': 'b', 'Chorus 2': 'bb', 'Chorus 3': 'bbb',
+  });
+
+  // Edit words: the text shows each section's name, so saving leaves every word on its own section.
+  const gappy = typed(fullSong, '[Verse 1]\na1\na2\n\n[Chorus 1]\nb1\nb2\n\n[Chorus 2]\nb1\nb2\n\n[Bridge]\nd1\n\n[Chorus 3]\nb1\nb2');
+  const gappyText = '[Verse 1]\na1\na2\n\n[Chorus 1]\nb1\nb2\n\n[Verse 2]\n\n[Chorus 2]\nb1\nb2\n\n[Bridge]\nd1\n\n[Chorus 3]\nb1\nb2';
+  same('edit words: the box shows the words under section names, with a sung section that has none, and no text for a song with none', [lyricsEdit.lyricsText(gappy), lyricsEdit.lyricsText(fullSong)], [gappyText, '']);
+  same('edit words: saving the text as it is, or with only spacing changed, changes nothing', [
+    typed(gappy, gappyText) === gappy,
+    typed(gappy, gappyText.replace('a1', '  a1 ').replace(/\n\n/g, '\n\n\n')) === gappy,
+  ], [true, true]);
+  same('edit words: a section stays blank when another changes, and clearing a section leaves the others where they are', [
+    shown(typed(gappy, gappyText.replace('d1', 'd9'))),
+    shown(typed(gappy, gappyText.replace('[Chorus 1]\nb1\nb2', '[Chorus 1]'))),
+    shown(typed(gappy, gappyText.replace('[Verse 2]', '[Verse 2]\nc1'))),
+  ], [
+    { 'Verse 1': 'a1/a2', 'Chorus 1': 'b1/b2', 'Chorus 2': 'b1/b2', Bridge: 'd9', 'Chorus 3': 'b1/b2' },
+    { 'Verse 1': 'a1/a2', 'Chorus 2': 'b1/b2', Bridge: 'd1', 'Chorus 3': 'b1/b2' },
+    { 'Verse 1': 'a1/a2', 'Chorus 1': 'b1/b2', 'Verse 2': 'c1', 'Chorus 2': 'b1/b2', Bridge: 'd1', 'Chorus 3': 'b1/b2' },
+  ]);
+  // 11 of 12 words the same: found lines would share a block here, and the changed word would be lost.
+  const chorusWords = 'one two three four five six\nseven eight nine ten eleven twelve';
+  const oneWord = typed(fullSong, `[Chorus 1]\n${chorusWords}\n\n[Chorus 2]\n${chorusWords}\n\n[Chorus 3]\n${chorusWords.replace('twelve', 'twelfth')}`);
+  same('edit words: one word changed in one long chorus stays changed, on a block of its own', [shown(oneWord)['Chorus 3'], blockOf(oneWord)], [
+    'one two three four five six/seven eight nine ten eleven twelfth',
+    { 'Chorus 1': 'chorus', 'Chorus 2': 'chorus', 'Chorus 3': 'chorus-3' },
+  ]);
+
+  const foundSong = {
+    ...shortSong,
+    lyrics: { source: 'youtube-auto', offset: 0.5, leadBeats: 3, fadeBeats: 1.5, blocks: {} },
+    timedLyrics: [line(0.1, 1.9, 'Found words', 'auto')],
+    lyricsPlacing: { linesPerSlide: 3, autoOffset: true },
+  } as PlacedSong;
+  const frozen = JSON.stringify(foundSong);
+  const saved = typed(foundSong, '[Verse 1]\na\nb\nc\nd');
+  const { blocks: _blocks, ...savedLyrics } = saved.lyrics!;
+  same('saving: source manual, no nudge, lead and fade kept, its lines per slide used, the found lines gone so Place again cannot bring them over the typed words', [
+    savedLyrics,
+    saved.lyricsPlacing,
+    'timedLyrics' in saved,
+    shown(saved),
+    lyricsEdit.placeAgain(saved),
+    lyricsEdit.laneSlides(saved).some(x => x.check),
+    JSON.stringify(foundSong) === frozen,
+  ], [
+    { source: 'manual', offset: 0, leadBeats: 3, fadeBeats: 1.5 },
+    { linesPerSlide: 3, autoOffset: false },
+    false,
+    { 'Verse 1': 'a/b/c | d' },
+    null,
+    false,
+    true,
+  ]);
+  const noSections = barSong([], 8);
+  same('saving nothing, or with no sections to put words on, leaves the song alone', [typed(foundSong, ' \n\n') === foundSong, typed(noSections, 'a') === noSections], [true, true]);
+  same('a song with only an intro and an instrumental still takes the words, so typed text is never thrown away', shown(typed(barSong([['intro', 0, 0], ['instrumental', 4]], 8), 'a\n\nb')), { Intro: 'a', Instrumental: 'b' });
+
+  const fixedThenOne = lyricsEdit.placeWordsAgain(lyricsEdit.setSlideText(typed(shortSong, '[Verse 1]\nv1\nv2\n\n[Chorus]\nc1\nc2'), 's0', 0, 'v1 fixed\nv2'), 1);
+  same('lines on a slide, typed words: placed again from what the slides say now, on the same sections', [shown(fixedThenOne), barsOf(fixedThenOne), fixedThenOne.lyricsPlacing?.linesPerSlide], [
+    { 'Verse 1': 'v1 fixed | v2', Chorus: 'c1 | c2' },
+    { 'Verse 1': [0, 4], Chorus: [0, 2] },
+    1,
+  ]);
+  same('place again, found words: goes the way it always did', [
+    lyricsEdit.placeWordsAgain(timedSong, 1).lyrics?.blocks,
+    lyricsEdit.placeWordsAgain(editBase) === editBase,
+  ], [lyricsEdit.placeAgain(timedSong, { linesPerSlide: 1 })!.song.lyrics?.blocks, true]);
+
+  const twoChoruses = typed(barSong([['chorus', 0], ['chorus', 4]], 8), '[Chorus]\nA\n\nB');
+  same('a chorus named once repeats whole, with the groups under its heading, on one block', [shown(twoChoruses), blockOf(twoChoruses)], [
+    { 'Chorus 1': 'A | B', 'Chorus 2': 'A | B' },
+    { 'Chorus 1': 'chorus', 'Chorus 2': 'chorus' },
+  ]);
+  const verseChorus = barSong([['verse', 0], ['chorus', 4]], 8);
+  const oddSlide = lyricsEdit.setSlideText(typed(verseChorus, '[Verse]\nv1'), 's0', 0, 'Chorus\n[Ooh]');
+  same('placing typed words again keeps slide text that reads like a heading, on its own section', shown(lyricsEdit.placeWordsAgain(oddSlide, 2)), { Verse: 'Chorus/[Ooh]' });
+
+  const tight = typed(barSong([['verse', 0], ['chorus', 2]], 4), '[Verse]\na\nb\nc\n\nd\ne\nf\n\ng\nh\ni');
+  same('more slides than bars: the bars win, one slide a bar, and every line stays in order', [shown(tight), barsOf(tight)], [{ Verse: 'a/b/c/d/e | f/g/h/i' }, { Verse: [0, 1] }]);
+}
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);
