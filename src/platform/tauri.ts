@@ -1,5 +1,6 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
+import { sendBackup, type BackupReply } from '../lib/backup';
 import type { CaptionTrack } from '../lib/lyricsFetch';
 import { normalizeSettings, type Desktop, type DiagnosticsExport, type Job, type LastSession, type Mobile, type Platform, type UpdateCheck, type UpdateProgress } from './types';
 
@@ -83,4 +84,16 @@ export const mobile: Mobile = {
   onAudioPause: handler => onEvent<null>('audio-pause', handler),
   onAudioInterrupted: handler => onEvent<null>('audio-interrupted', handler),
   takeDevSeed: async () => unpack(await invoke<ArrayBuffer>('take_dev_seed')),
+  async saveBackup(file, name, onProgress) {
+    let answer: (reply: BackupReply) => void = () => {};
+    const stop = await listen<BackupReply>('backup-reply', event => answer(event.payload));
+    try {
+      return await sendBackup(file, name, step => new Promise((resolve, reject) => {
+        answer = resolve;
+        emit('backup', step).catch(reject);
+      }), onProgress);
+    } finally {
+      stop();
+    }
+  },
 };

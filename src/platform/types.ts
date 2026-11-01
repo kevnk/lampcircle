@@ -125,6 +125,8 @@ export type Mobile = {
   onAudioInterrupted(handler: () => void): () => void;
   /** Debug builds only: the files in <app data>/dev-seed, once, and route.txt. Rejects in a release build. */
   takeDevSeed(): Promise<{ files: File[]; route?: string }>;
+  /** Stages a library backup in the app, then opens iOS's save dialog. False when the person cancels. */
+  saveBackup(file: Blob, name: string, onProgress: (part: number) => void): Promise<boolean>;
 };
 
 export const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;

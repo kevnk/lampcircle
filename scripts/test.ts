@@ -1116,6 +1116,58 @@ const player = (paused = false) => ({ paused, pauses: 0, pause() { this.pauses++
   same('and after a call, playing takes the session back first', log, ['claim', 'run']);
 }
 
+// The Settings sheet: what a restore says, and handing a backup to Rust a piece at a time.
+{
+  same('a restore lists what it added', backup.addedText({ songs: 2, pads: 1, sets: 0, audio: 3 }), 'Added 2 songs, 1 pad and 3 recordings.');
+  same('one kind reads alone', backup.addedText({ songs: 0, pads: 0, sets: 1, audio: 0 }), 'Added 1 set.');
+  same('a restore with nothing new says so', backup.addedText({ songs: 0, pads: 0, sets: 0, audio: 0 }), 'Nothing new to add. Everything in that file is already in your library.');
+
+  const MB = 1 << 20;
+  const bytes = Uint8Array.from({ length: 2 * MB + 5 }, (_, i) => (i * 7) % 256);
+  const file = new Blob([bytes]);
+  /** Stands in for src-tauri/src/ios/backup.rs. */
+  const rust = (overrides: { piece?: (at: number) => object | undefined; finish?: object } = {}) => {
+    const stored: number[] = [];
+    const steps: string[] = [];
+    const ask = async (step: { step: 'piece'; at: number; hex: string } | { step: 'finish'; size: number }) => {
+      if (step.step === 'finish') {
+        steps.push(`finish ${step.size}`);
+        return overrides.finish ?? { saved: true };
+      }
+      steps.push(`piece ${step.at}`);
+      const special = overrides.piece?.(step.at);
+      if (special) return special;
+      for (let i = 0; i < step.hex.length; i += 2) stored.push(parseInt(step.hex.slice(i, i + 2), 16));
+      return { written: stored.length };
+    };
+    return { stored, steps, ask };
+  };
+
+  const whole = rust();
+  const parts: number[] = [];
+  same('a saved backup reports saved', await backup.sendBackup(file, 'a.lampcircle', whole.ask, (part: number) => parts.push(r3(part))), true);
+  same('it goes a piece at a time, then finishes with the size', whole.steps, [`piece 0`, `piece ${MB}`, `piece ${2 * MB}`, `finish ${2 * MB + 5}`]);
+  same('every byte arrives in order', Buffer.from(whole.stored).equals(Buffer.from(bytes)), true);
+  same('progress climbs to the whole file', parts, [0.5, 1, 1]);
+  same('cancelling the save dialog is not saved', await backup.sendBackup(file, 'a.lampcircle', rust({ finish: { saved: false } }).ask, () => {}), false);
+
+  const fails = async (server: ReturnType<typeof rust>) => backup.sendBackup(file, 'a.lampcircle', server.ask, () => {}).then(() => 'finished', (error: Error) => error.message);
+  const full = rust({ piece: at => (at === MB ? { error: 'No space left on device' } : undefined) });
+  same('a failed write says why', await fails(full), 'The backup was not saved. No space left on device');
+  same('and nothing follows it, so the save dialog never opens', full.steps, ['piece 0', `piece ${MB}`]);
+  const short = rust({ piece: at => (at === MB ? { written: MB + 1 } : undefined) });
+  same('a short write stops the backup', await fails(short), 'The backup was not saved. It stopped part way.');
+  same('and the save dialog never opens', short.steps, ['piece 0', `piece ${MB}`]);
+  same('a whole file that fails its last check is not saved', await fails(rust({ finish: { error: 'The backup came out the wrong size.' } })), 'The backup was not saved. The backup came out the wrong size.');
+  const sent: Array<{ step: string; hex?: string }> = [];
+  await backup.sendBackup(new Blob([Uint8Array.of(0, 15, 255)]), 'a.lampcircle', async (step: { step: string; hex?: string }) => (sent.push(step), step.step === 'piece' ? { written: 3 } : { saved: true }), () => {});
+  same('bytes go as two hex digits each, with leading zeros', sent[0].hex, '000fff');
+  const trip = rust();
+  await backup.sendBackup(backup.packLibrary({ songs: [], pads: [], sets: [], audio: [['a', file]] }), 'a.lampcircle', trip.ask, () => {});
+  const back = await backup.unpackLibrary(new Blob([Uint8Array.from(trip.stored)]));
+  same('a packed library survives the trip', Buffer.from(await back.audio[0][1].arrayBuffer()).equals(Buffer.from(bytes)), true);
+}
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);

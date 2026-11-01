@@ -15,6 +15,9 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::error::{AppError, Result};
 
+#[cfg(any(test, target_os = "ios"))]
+mod backup;
+
 /// What Library adds: recordings, and the .djw maps that go with them.
 const IMPORT_TYPES: &[&str] = &[
     "mp3", "m4a", "aac", "wav", "aif", "aiff", "caf", "flac", "djw",
@@ -352,6 +355,7 @@ pub fn setup(app: &tauri::App) {
 
     audio_session::start(app);
     watch_inbox(app);
+    backup::start(app);
 
     let Some(window) = app.get_webview_window("main") else {
         return;
