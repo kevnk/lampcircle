@@ -60,7 +60,7 @@ export function LyricsPanel({ song, edit }: { song: Song; edit: LyricsEdit | nul
     setNote(null);
     const found = await findLyrics(song);
     setFinding(false);
-    if (!found) return setNote('No lyrics found: the video has no captions, and LRCLIB has nothing for this title.');
+    if (!found) return setNote('No lyrics found: the video has no captions and LRCLIB has nothing for this title, or there is no internet right now.');
     setNote(found.note ?? null);
     // A record timed to a recording of another length gets its offset estimated, and Place again keeps doing that.
     const autoOffset = found.kind === 'lrc' && Boolean(found.note);
@@ -90,9 +90,9 @@ export function LyricsPanel({ song, edit }: { song: Song; edit: LyricsEdit | nul
                   </Button>
                 </div>
                 <Slider label="Nudge" value={lyrics?.offset ?? 0} min={-2} max={2} step={0.05} text={`${(lyrics?.offset ?? 0) > 0 ? '+' : ''}${(lyrics?.offset ?? 0).toFixed(2)} s`} disabled={!canPlace} onChange={onSlide((latest, offset) => placeAgain(latest, { offset })?.song ?? latest)} {...letGo}>
-                  Moves every line earlier or later, then places them again. For words that come in late or early everywhere.
+                  Moves every line earlier or later, then places them again, replacing your slide edits. For words that come in late or early everywhere.
                 </Slider>
-                <div>
+                <div title="Places the found lines again with this many on a slide, replacing your slide edits. Undo brings them back.">
                   <p className="mb-1.5 font-medium">Lines on a slide</p>
                   <div className="inline-flex rounded-full border border-line p-1" role="group" aria-label="Lines on a slide">
                     {[1, 2, 3, 4].map(count => (
