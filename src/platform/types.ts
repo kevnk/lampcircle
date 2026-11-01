@@ -90,7 +90,7 @@ export type Platform = {
   saveText(text: string, fileName: string): Promise<boolean>;
 };
 
-/** The template's Mac-only features. Only code that runs in the Mac app touches these. */
+/** The template's Mac-only features. Only code that runs in the Mac app touches these, apart from the lyrics window's, which iPhone and iPad share for a TV on AirPlay. */
 export type Desktop = {
   getSettings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<void>;

@@ -1398,6 +1398,35 @@ same('the display delay is saved with lead and fade: held to its range, and savi
   { leadBeats: 3, fadeBeats: 0 },
 ]);
 
+// The TV on AirPlay, from iPhone and iPad: its button, and what the page says to do.
+const tvMonitor = { id: windowLib.AIRPLAY_TV, name: 'TV', width: 1920, height: 1080, x: 0, y: 0, isPrimary: false };
+same('the Display button says where the words are: nothing to show on, a TV turned off, on the TV, and a Mac screen as before', [
+  windowLib.displayLabel(null, []),
+  windowLib.displayLabel(null, [tvMonitor]),
+  windowLib.displayLabel(windowLib.AIRPLAY_TV, [tvMonitor]),
+  windowLib.displayLabel('projector', [mac, screen('projector')]),
+  windowLib.displayLabel(null, [mac, screen('projector')]),
+], ['Display', 'Display', 'On TV', 'On Display 2', 'Display']);
+same('the button follows a TV: it connects on its own, stops mirroring, and a list a moment behind the window closes nothing', [
+  windowLib.syncDisplay(null, windowLib.AIRPLAY_TV, [tvMonitor]),
+  windowLib.syncDisplay(windowLib.AIRPLAY_TV, null, []),
+  windowLib.syncDisplay(windowLib.AIRPLAY_TV, null, [tvMonitor]),
+  windowLib.syncDisplay(null, windowLib.AIRPLAY_TV, []),
+], [
+  { chosen: windowLib.AIRPLAY_TV, close: false },
+  { chosen: null, close: false },
+  { chosen: null, close: false },
+  { chosen: windowLib.AIRPLAY_TV, close: false },
+]);
+same('what the picker says: how to reach the TV, what Turn off does, nothing to add, and the Mac as before', [
+  windowLib.displayHint(null, [], true)?.includes('Control Center'),
+  windowLib.displayHint(windowLib.AIRPLAY_TV, [tvMonitor], true)?.includes('back on the TV'),
+  windowLib.displayHint(null, [tvMonitor], true),
+  windowLib.displayHint(null, [mac], false)?.includes('⌘W'),
+  windowLib.displayHint('mac', [mac], false),
+  windowLib.displayHint(null, [mac, screen('projector')], false),
+], [true, true, null, true, null, null]);
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);

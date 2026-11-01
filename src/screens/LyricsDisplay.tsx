@@ -2,10 +2,10 @@ import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { desktop, isIOS, isTauri } from '../platform';
 import { takeCue, type DisplayCue } from '../lib/lyricsCue';
 import { WORDS_START, facesAt, loadDisplayDelay, type WordsState } from '../lib/lyricsDisplay';
-import { catchUpCues, leaveCue, monitorChoices, monitorLabel, oneAtATime, scheduleCue, syncDisplay, wordsStartAt, type MonitorInfo } from '../lib/lyricsWindow';
+import { catchUpCues, displayHint, displayLabel, leaveCue, monitorChoices, monitorLabel, oneAtATime, scheduleCue, syncDisplay, wordsStartAt, type MonitorInfo } from '../lib/lyricsWindow';
 import { SlideScreen } from './LyricsPanel';
 
-const canDisplay = isTauri() && !isIOS();
+const canDisplay = isTauri();
 
 /**
  * The lyrics window (index.html?window=lyrics): the words on the whole screen, driven only by the cues Perform sends.
@@ -21,12 +21,17 @@ export function LyricsWindow() {
     const stop = desktop.joinLyricsCues(cues => {
       display = cues.reduce((held, cue) => takeCue(held, cue, Date.now()), display);
     });
-    const loop = () => {
-      frame = requestAnimationFrame(loop);
+    const step = () => {
       const next = facesAt(shown, display, Date.now());
       if (next.up !== shown.up || next.was !== shown.was || next.p !== shown.p) setFaces((shown = next));
     };
+    const loop = () => {
+      frame = requestAnimationFrame(loop);
+      step();
+    };
     frame = requestAnimationFrame(loop);
+    // A TV's frames may stall while the phone's own screen is covered. The fade gets rough, but the words still change.
+    const steady = setInterval(step, 250);
     // Handled here, so Esc doesn't go on to macOS and take the window out of fullscreen.
     const swallow = (event: KeyboardEvent) => {
       if (!event.metaKey) event.preventDefault();
@@ -35,6 +40,7 @@ export function LyricsWindow() {
     return () => {
       stop();
       cancelAnimationFrame(frame);
+      clearInterval(steady);
       window.removeEventListener('keydown', swallow);
     };
   }, []);
@@ -114,7 +120,13 @@ export function useDisplayLink(holder: MutableRefObject<WordsState>, tick: () =>
   useEffect(() => {
     if (!canDisplay) return;
     void refresh();
-    const stops = [desktop.onLyricsDisplayClosed(() => void refresh()), desktop.onLyricsDisplayReady(() => sendCues(catchUpCues(holder.current.display), Date.now()))];
+    const stops = [
+      desktop.onLyricsDisplayClosed(() => void refresh()),
+      desktop.onLyricsDisplayReady(() => {
+        sendCues(catchUpCues(holder.current.display), Date.now());
+        void refresh();
+      }),
+    ];
     const polling = setInterval(() => void refresh(), 2000);
     const ticking = setInterval(() => latestTick.current(), 250);
     return () => {
@@ -137,12 +149,12 @@ export function DisplayButton({ link, className }: { link: DisplayLink; classNam
   const [picking, setPicking] = useState(false);
   if (!link.available) {
     return (
-      <button type="button" disabled title={isIOS() ? 'Coming in a later step' : 'Only in the Mac app'} className={className}>
+      <button type="button" disabled title="Only in the Lamp Circle app" className={className}>
         Display
       </button>
     );
   }
-  const current = link.monitors.find(monitor => monitor.id === link.on);
+  const hint = displayHint(link.on, link.monitors, isIOS());
   const choices = monitorChoices(link.monitors);
   const pick = (monitor: string) => () => {
     setPicking(false);
@@ -159,7 +171,7 @@ export function DisplayButton({ link, className }: { link: DisplayLink; classNam
           setPicking(!picking);
         }}
       >
-        {current ? `On ${monitorLabel(current, link.monitors)}` : 'Display'}
+        {displayLabel(link.on, link.monitors)}
       </button>
       {!picking && link.error && (
         <p className="absolute right-0 top-full z-10 mt-1 whitespace-nowrap text-sm font-semibold text-amber" role="alert">
@@ -176,13 +188,15 @@ export function DisplayButton({ link, className }: { link: DisplayLink; classNam
               return (
                 <button key={monitor.id} type="button" aria-pressed={here} className={`block w-full rounded-xl px-3 py-2.5 text-left hover:bg-raised ${here || (!link.on && k === 0) ? 'bg-accent-soft' : ''}`} onClick={pick(monitor.id)}>
                   <span className={`block font-medium ${here ? 'text-amber' : ''}`}>{monitorLabel(monitor, link.monitors)}</span>
-                  <span className="tabular block text-sm text-muted">
-                    {monitor.width} × {monitor.height}
-                  </span>
+                  {monitor.width > 0 && (
+                    <span className="tabular block text-sm text-muted">
+                      {monitor.width} × {monitor.height}
+                    </span>
+                  )}
                 </button>
               );
             })}
-            {choices.length === 1 && !link.on && <p className="px-3 py-1.5 text-sm text-muted">This takes over the only screen. Press ⌘W to come back.</p>}
+            {hint && <p className="px-3 py-1.5 text-sm text-muted">{hint}</p>}
             {link.on && (
               <button
                 type="button"
