@@ -2,6 +2,11 @@
 //! and a debug-only seed for simulator screenshots. Library and Perform call these only on iOS.
 
 use serde::Serialize;
+#[cfg(any(test, target_os = "ios"))]
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicUsize, Ordering},
+};
 use tauri::ipc::Response;
 use tauri::AppHandle;
 #[cfg(target_os = "ios")]
@@ -263,6 +268,80 @@ mod audio_session {
     }
 }
 
+/// Moves the .djw files in `inbox` to `to`, once each, and says where they went. No inbox means no files.
+/// Each gets a folder of its own, so a second file with the same name cannot replace one the page has not read yet.
+#[cfg(any(test, target_os = "ios"))]
+fn take_from_inbox(inbox: &Path, to: &Path) -> Vec<PathBuf> {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let Ok(entries) = std::fs::read_dir(inbox) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("djw"))
+        })
+        .filter_map(|path| {
+            let folder = to.join(format!("opened-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
+            let moved = folder.join(path.file_name()?);
+            std::fs::create_dir_all(&folder)
+                .and_then(|()| std::fs::rename(&path, &moved))
+                .map_err(|error| {
+                    log::warn!("Could not take {} from the inbox: {error}", path.display())
+                })
+                .ok()?;
+            Some(moved)
+        })
+        .collect()
+}
+
+/// Hands the page any .djw iOS has copied to Documents/Inbox, from the Files app, AirDrop or a share sheet.
+/// The folder is the only reliable list: tao drops the URL of a scene that is connecting, which is every cold launch.
+/// True when it found one. `take_opened_files` reads them, and iOS clears the temporary folder in time.
+#[cfg(target_os = "ios")]
+fn collect_inbox(app: &AppHandle) -> bool {
+    let Ok(documents) = app.path().document_dir() else {
+        return false;
+    };
+    let files = take_from_inbox(&documents.join("Inbox"), &std::env::temp_dir());
+    let found = !files.is_empty();
+    app.state::<crate::OpenedFiles>()
+        .0
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .extend(files);
+    found
+}
+
+/// Looks in the inbox now, for a launch that opened a file, and whenever the app comes to the front or is told
+/// to open one. A plugin added here can see those events, so this stays out of the app's own run loop.
+#[cfg(target_os = "ios")]
+fn watch_inbox(app: &tauri::App) {
+    use tauri::{Emitter, RunEvent, WindowEvent};
+
+    collect_inbox(app.handle());
+    let watcher = tauri::plugin::Builder::<tauri::Wry>::new("djw-inbox")
+        .on_event(|app, event| {
+            let look = matches!(
+                event,
+                RunEvent::Opened { .. }
+                    | RunEvent::WindowEvent {
+                        event: WindowEvent::Focused(true),
+                        ..
+                    }
+            );
+            if look && collect_inbox(app) {
+                let _ = app.emit_to("main", "files-opened", ());
+            }
+        })
+        .build();
+    if let Err(error) = app.handle().plugin(watcher) {
+        log::warn!("Could not watch for opened files: {error}");
+    }
+}
+
 /// The page pads itself with env(safe-area-inset-*), so the web view must not inset it too.
 #[cfg(target_os = "ios")]
 pub fn setup(app: &tauri::App) {
@@ -272,6 +351,7 @@ pub fn setup(app: &tauri::App) {
     use objc2_ui_kit::{UIScrollView, UIScrollViewContentInsetAdjustmentBehavior};
 
     audio_session::start(app);
+    watch_inbox(app);
 
     let Some(window) = app.get_webview_window("main") else {
         return;
@@ -295,7 +375,35 @@ pub fn setup(app: &tauri::App) {
 
 #[cfg(test)]
 mod tests {
-    use super::frame;
+    use super::{frame, take_from_inbox};
+
+    #[test]
+    fn takes_each_djw_from_the_inbox_once() {
+        let root = std::env::temp_dir().join(format!("lampcircle-inbox-{}", std::process::id()));
+        let inbox = root.join("Inbox");
+        let to = root.join("to");
+        std::fs::create_dir_all(&inbox).unwrap();
+        std::fs::create_dir_all(&to).unwrap();
+        std::fs::write(inbox.join("Way Maker.DJW"), "djw: 2").unwrap();
+        std::fs::write(inbox.join("notes.txt"), "not a map").unwrap();
+
+        let first = take_from_inbox(&inbox, &to);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].file_name().unwrap(), "Way Maker.DJW");
+        assert!(inbox.join("notes.txt").exists());
+        assert!(take_from_inbox(&inbox, &to).is_empty());
+
+        std::fs::write(inbox.join("Way Maker.DJW"), "a second file").unwrap();
+        let second = take_from_inbox(&inbox, &to);
+        assert_eq!(std::fs::read_to_string(&first[0]).unwrap(), "djw: 2");
+        assert_eq!(
+            std::fs::read_to_string(&second[0]).unwrap(),
+            "a second file"
+        );
+        assert!(take_from_inbox(&root.join("no inbox yet"), &to).is_empty());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 
     #[test]
     fn frames_the_header_then_each_file() {
