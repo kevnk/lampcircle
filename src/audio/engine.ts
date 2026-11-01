@@ -2,11 +2,16 @@ import type { Pad, Song } from '../types';
 import { getAudio } from '../lib/db';
 import { barBeatAt, barSeconds, beatPos, beatTime, keyOf, sectionViews, songGrid, upper, type Grid, type SectionView } from '../lib/songMap';
 import { EVEN_LOUDNESS, clockBoundary, decideNext, fadeCurve, fadeOutStart, leadIn, nextBoundary, seamEnd, seamFades, type FadeShape, type JumpFade, type Reason, type SeamFades } from '../lib/performPlan';
+import { isIOS, mobile } from '../platform';
+import { AudioHolders, type Holder } from './holders';
 
 const COMMIT_AHEAD = 3;
 const MIN_RAMP = 0.005;
 /** Seconds a loop's lead-in takes to fade away when you let go of a hold after it started. */
 const LET_GO_FADE = 0.2;
+const ios = isIOS();
+/** Seconds of quiet before iPhone and iPad give the audio session back. */
+const SESSION_GRACE = 15;
 
 interface Bus {
   ctx: AudioContext;
@@ -34,6 +39,22 @@ export function audio(): Bus {
   main.connect(ctx.destination);
   bus = { ctx, main, song, pad, meter };
   return bus;
+}
+
+export const audioHolders = new AudioHolders(
+  {
+    claim: () => mobile.setAudioPlaying(true),
+    giveBack: () => void mobile.setAudioPlaying(false),
+    run: () => void audio().ctx.resume(),
+    rest: () => audio().ctx.suspend(),
+  },
+  SESSION_GRACE * 1000,
+);
+
+/** Starts the audio clock for what is about to play. iPhone and iPad also take the audio session. */
+function hold(who: Holder) {
+  if (ios) audioHolders.hold(who);
+  else void audio().ctx.resume();
 }
 
 export function now(): number {
@@ -165,6 +186,8 @@ function stop(voice: { source: AudioScheduledSourceNode }, at?: number) {
 class Transport {
   id: string | null = null;
   buffer: AudioBuffer | null = null;
+  /** It lets go of the audio session whenever it stops, so while it holds the session it is playing. */
+  readonly paused = false;
   private voice: Voice | null = null;
   private startedCtx = 0;
   private offset = 0;
@@ -213,11 +236,19 @@ class Transport {
   play() {
     if (!this.buffer || this.voice) return;
     const { ctx, song } = audio();
-    void ctx.resume();
+    hold(this);
     if (this.offset >= this.buffer.duration - 0.05) this.offset = 0;
     this.startedCtx = ctx.currentTime + 0.01;
-    this.voice = play(this.buffer, song, this.startedCtx, this.offset);
-    fadeTo(this.voice, 1, this.startedCtx, this.startedCtx + MIN_RAMP);
+    const voice = play(this.buffer, song, this.startedCtx, this.offset);
+    this.voice = voice;
+    fadeTo(voice, 1, this.startedCtx, this.startedCtx + MIN_RAMP);
+    // position() notices the end only while a screen polls it. iPhone and iPad must notice anyway, or the audio session stays taken.
+    if (ios) {
+      const end = this.buffer.duration;
+      voice.source.addEventListener('ended', () => {
+        if (this.voice === voice) this.release(end);
+      });
+    }
     this.changed();
   }
 
@@ -229,6 +260,7 @@ class Transport {
     const voice = this.voice!;
     this.voice = null;
     this.offset = at;
+    if (ios) audioHolders.letGo(this);
     fadeTo(voice, 0, now(), now() + 0.02);
     stop(voice, now() + 0.03);
     this.changed();
@@ -396,7 +428,9 @@ export class PerformSession {
     this.pads = [];
     this.fading = [];
     // Other screens share the bus: leave it running and at full volume, even partway through a fade back in.
-    this.resume();
+    // iPhone and iPad rest it instead, so leaving Perform never takes the session from other apps.
+    if (ios) audioHolders.letGo(this);
+    else this.resume();
     fadeTo(this.master, 1, now(), now());
   }
 
@@ -563,7 +597,7 @@ export class PerformSession {
   /** Start the clock again and fade back in over `bars`. Mid fade-out, it turns back from the level it reached. */
   resume(bars = 0) {
     // Also wakes a context the browser started suspended. Calls to the context run in order, so this wins over a suspend still in flight.
-    void audio().ctx.resume();
+    hold(this);
     if (!this.paused) return;
     this.paused = false;
     this.suspendAt = null;
@@ -574,6 +608,8 @@ export class PerformSession {
 
   /** Start or change the pad. The new pad fades in from `at` while the old one fades out. */
   setPad(tonic: number, at: number, fade: number): Promise<PadVoice | null> {
+    // A pad can be the first sound, as when Practice opens on one. iPhone and iPad keep the clock stopped until then.
+    if (ios) hold(this);
     this.padLoads++;
     return this.loadPad(tonic, at, fade).finally(() => this.padLoads--);
   }

@@ -1791,6 +1791,365 @@ same('going back to the song that just ended counts as new, so Blank from the pa
   same('never calibrated, no output has changed', cal.outputMoved({ offsetMs: 0 }, 500), false);
 }
 
+// iPhone and iPad: who holds the audio session.
+const { AudioHolders } = await import('../src/audio/holders.ts');
+function holdersWith(options: { rest?: () => Promise<unknown>; claim?: () => Promise<unknown> } = {}) {
+  const log: string[] = [];
+  const holders = new AudioHolders(
+    {
+      claim: () => {
+        log.push('claim');
+        return options.claim?.() ?? Promise.resolve();
+      },
+      giveBack: () => log.push('give back'),
+      run: () => log.push('run'),
+      rest: () => {
+        log.push('rest');
+        return options.rest?.() ?? Promise.resolve();
+      },
+    },
+    0,
+  );
+  return { log, holders };
+}
+const nextTimers = () => new Promise(done => setTimeout(done, 5));
+const player = (paused = false) => ({ paused, pauses: 0, pause() { this.pauses++; } });
+{
+  const { log, holders } = holdersWith();
+  const a = player();
+  holders.hold(a);
+  await nextTimers();
+  same('playing takes the session, then starts the clock', log, ['claim', 'run']);
+  holders.letGo(a);
+  same('stopping gives nothing back straight away', log, ['claim', 'run']);
+  await nextTimers();
+  same('after the wait the clock rests, then the session goes back', log, ['claim', 'run', 'rest', 'give back']);
+  holders.hold(a);
+  await nextTimers();
+  same('playing again takes it back', log.slice(-2), ['claim', 'run']);
+}
+{
+  let sessionIsOurs = () => {};
+  const { log, holders } = holdersWith({ claim: () => new Promise<void>(done => (sessionIsOurs = done)) });
+  const [a, b] = [player(), player()];
+  holders.hold(a);
+  holders.hold(b);
+  await nextTimers();
+  same('the clock waits for the session, and it is taken once', log, ['claim']);
+  holders.letGo(b);
+  sessionIsOurs();
+  await nextTimers();
+  same('then it starts for what still plays', log, ['claim', 'run']);
+}
+{
+  const { log, holders } = holdersWith();
+  const a = player();
+  holders.hold(a);
+  holders.letGo(a);
+  holders.hold(a);
+  await nextTimers();
+  same('a seek or short pause keeps the session, and never takes it again', log, ['claim', 'run', 'run']);
+  holders.hold(player());
+  await nextTimers();
+  same('a pad or a new song under the same session does not take it again', log.filter(item => item === 'claim').length, 1);
+}
+{
+  const { log, holders } = holdersWith();
+  const pausedFirst = player(true);
+  holders.hold(pausedFirst);
+  await nextTimers();
+  same('paused before the session arrives, the clock stays stopped', log, ['claim']);
+}
+{
+  const { log, holders } = holdersWith();
+  const [a, b] = [player(), player()];
+  holders.hold(a);
+  holders.hold(b);
+  holders.letGo(a);
+  await nextTimers();
+  same('the session stays while anything still plays', log.includes('rest'), false);
+  holders.letGo(b);
+  await nextTimers();
+  same('and goes back when the last one stops', log.slice(-2), ['rest', 'give back']);
+}
+{
+  let finishRest = () => {};
+  const { log, holders } = holdersWith({ rest: () => new Promise<void>(done => (finishRest = done)) });
+  const a = player();
+  holders.hold(a);
+  await nextTimers();
+  holders.letGo(a);
+  await nextTimers();
+  holders.hold(a);
+  await nextTimers();
+  finishRest();
+  await nextTimers();
+  same('playing again while the clock is stopping keeps the session', log, ['claim', 'run', 'rest', 'run']);
+}
+{
+  const { log, holders } = holdersWith();
+  holders.letGo(player());
+  await nextTimers();
+  same('leaving Perform without playing leaves the session alone', log, []);
+}
+{
+  const { log, holders } = holdersWith();
+  holders.unlocked();
+  await nextTimers();
+  same('the first tap rests the clock and takes no session', log, ['rest']);
+  const playing = holdersWith();
+  playing.holders.hold(player());
+  playing.holders.unlocked();
+  await nextTimers();
+  same('a first tap that started playback leaves the clock running', playing.log, ['claim', 'run']);
+}
+{
+  const { log, holders } = holdersWith();
+  const [paused, playing] = [player(true), player()];
+  holders.hold(paused);
+  await nextTimers();
+  log.length = 0;
+  holders.wake();
+  same('coming back to a paused set leaves the clock stopped', log, []);
+  holders.hold(playing);
+  await nextTimers();
+  log.length = 0;
+  holders.wake();
+  same('coming back to a playing set starts the clock', log, ['run']);
+  log.length = 0;
+  holders.pauseAll();
+  same('unplugged headphones pause everything', [paused.pauses, playing.pauses], [1, 1]);
+  await nextTimers();
+  same('a pause alone keeps the session, so a pause for prayer does not give it back', log, []);
+  holders.hold(playing);
+  await nextTimers();
+  same('so playing on does not take it again', log, ['run']);
+  log.length = 0;
+  holders.interrupted();
+  same('a call pauses everything too', [paused.pauses, playing.pauses], [2, 2]);
+  holders.hold(playing);
+  await nextTimers();
+  same('and after a call, playing takes the session back first', log, ['claim', 'run']);
+}
+
+// The Settings sheet: what a restore says, and handing a backup to Rust a piece at a time.
+{
+  same('a restore lists what it added', backup.addedText({ songs: 2, pads: 1, sets: 0, audio: 3 }), 'Added 2 songs, 1 pad and 3 recordings.');
+  same('one kind reads alone', backup.addedText({ songs: 0, pads: 0, sets: 1, audio: 0 }), 'Added 1 set.');
+  same('a restore with nothing new says so', backup.addedText({ songs: 0, pads: 0, sets: 0, audio: 0 }), 'Nothing new to add. Everything in that file is already in your library.');
+
+  const MB = 1 << 20;
+  const bytes = Uint8Array.from({ length: 2 * MB + 5 }, (_, i) => (i * 7) % 256);
+  const file = new Blob([bytes]);
+  /** Stands in for src-tauri/src/ios/backup.rs. */
+  const rust = (overrides: { piece?: (at: number) => object | undefined; finish?: object } = {}) => {
+    const stored: number[] = [];
+    const steps: string[] = [];
+    const ask = async (step: { step: 'piece'; at: number; hex: string } | { step: 'finish'; size: number }) => {
+      if (step.step === 'finish') {
+        steps.push(`finish ${step.size}`);
+        return overrides.finish ?? { saved: true };
+      }
+      steps.push(`piece ${step.at}`);
+      const special = overrides.piece?.(step.at);
+      if (special) return special;
+      for (let i = 0; i < step.hex.length; i += 2) stored.push(parseInt(step.hex.slice(i, i + 2), 16));
+      return { written: stored.length };
+    };
+    return { stored, steps, ask };
+  };
+
+  const whole = rust();
+  const parts: number[] = [];
+  same('a saved backup reports saved', await backup.sendBackup(file, 'a.lampcircle', whole.ask, (part: number) => parts.push(r3(part))), true);
+  same('it goes a piece at a time, then finishes with the size', whole.steps, [`piece 0`, `piece ${MB}`, `piece ${2 * MB}`, `finish ${2 * MB + 5}`]);
+  same('every byte arrives in order', Buffer.from(whole.stored).equals(Buffer.from(bytes)), true);
+  same('progress climbs to the whole file', parts, [0.5, 1, 1]);
+  same('cancelling the save dialog is not saved', await backup.sendBackup(file, 'a.lampcircle', rust({ finish: { saved: false } }).ask, () => {}), false);
+
+  const fails = async (server: ReturnType<typeof rust>) => backup.sendBackup(file, 'a.lampcircle', server.ask, () => {}).then(() => 'finished', (error: Error) => error.message);
+  const full = rust({ piece: at => (at === MB ? { error: 'No space left on device' } : undefined) });
+  same('a failed write says why', await fails(full), 'The backup was not saved. No space left on device');
+  same('and nothing follows it, so the save dialog never opens', full.steps, ['piece 0', `piece ${MB}`]);
+  const short = rust({ piece: at => (at === MB ? { written: MB + 1 } : undefined) });
+  same('a short write stops the backup', await fails(short), 'The backup was not saved. It stopped part way.');
+  same('and the save dialog never opens', short.steps, ['piece 0', `piece ${MB}`]);
+  same('a whole file that fails its last check is not saved', await fails(rust({ finish: { error: 'The backup came out the wrong size.' } })), 'The backup was not saved. The backup came out the wrong size.');
+  const sent: Array<{ step: string; hex?: string }> = [];
+  await backup.sendBackup(new Blob([Uint8Array.of(0, 15, 255)]), 'a.lampcircle', async (step: { step: string; hex?: string }) => (sent.push(step), step.step === 'piece' ? { written: 3 } : { saved: true }), () => {});
+  same('bytes go as two hex digits each, with leading zeros', sent[0].hex, '000fff');
+  const trip = rust();
+  await backup.sendBackup(backup.packLibrary({ songs: [], pads: [], sets: [], audio: [['a', file]] }), 'a.lampcircle', trip.ask, () => {});
+  const back = await backup.unpackLibrary(new Blob([Uint8Array.from(trip.stored)]));
+  same('a packed library survives the trip', Buffer.from(await back.audio[0][1].arrayBuffer()).equals(Buffer.from(bytes)), true);
+}
+
+// Haptics: when Perform's ticks go, on a stand-in audio clock and timers.
+{
+  const haptics = await import('../src/lib/haptics.ts');
+  const { normalizeSettings } = await import('../src/platform/types.ts');
+  const LAG = haptics.TICK_LAG;
+  const A = { idx: 2, at: 110 };
+  const B = { idx: 3, at: 110 };
+
+  const stage = (options: { latency?: number } = {}) => {
+    let t = 100;
+    const world = { ready: true, latency: options.latency ?? 0, fired: [] as Array<[string, number]>, armed: 0 };
+    let timers: Array<{ due: number; run: () => void }> = [];
+    const ticks = haptics.hapticTicks({
+      clock: () => t,
+      latency: () => world.latency,
+      ready: () => world.ready,
+      fire: kind => world.fired.push([kind, r3(t)]),
+      schedule: (run, seconds) => {
+        const timer = { due: t + seconds, run };
+        timers.push(timer);
+        world.armed++;
+        return () => {
+          timers = timers.filter(item => item !== timer);
+        };
+      },
+    });
+    /** Moves the clock on, running each timer when it comes due. */
+    const to = (end: number) => {
+      for (;;) {
+        const due = timers.filter(timer => timer.due <= end).sort((a, b) => a.due - b.due)[0];
+        if (!due) break;
+        timers = timers.filter(timer => timer !== due);
+        t = Math.max(t, due.due);
+        due.run();
+      }
+      t = end;
+    };
+    /** Moves the clock with every timer asleep, as in the background. The timers run late, on waking. */
+    const sleep = (end: number) => {
+      t = end;
+      const late = timers;
+      timers = [];
+      late.forEach(timer => timer.run());
+    };
+    return { ...world, world, ticks, to, sleep, kinds: () => world.fired.map(([kind]) => kind) };
+  };
+
+  const queuing = stage();
+  queuing.ticks.update(A, false);
+  same('queuing a section ticks at the tap', queuing.world.fired, [['selection', 100]]);
+  const armed = queuing.world.armed;
+  queuing.to(105);
+  queuing.ticks.update(A, false);
+  queuing.ticks.update(A, false);
+  same('the same queue on later frames ticks no more and sets no new timer', [queuing.kinds(), queuing.world.armed], [['selection'], armed]);
+  queuing.to(115);
+  same('it wakes the engine a second ahead, then ticks ahead of the landing by the lag', queuing.world.fired, [['selection', 100], ['prepare', r3(110 - LAG - 1)], ['landing', r3(110 - LAG)]]);
+  queuing.ticks.update(null, false);
+  same('the queue emptying at the landing adds no tick', queuing.kinds(), ['selection', 'prepare', 'landing']);
+
+  const cancelling = stage();
+  cancelling.ticks.update(A, false);
+  cancelling.to(105);
+  cancelling.ticks.update(null, false);
+  cancelling.to(115);
+  same('cancelling ticks, and the landing never comes', cancelling.world.fired, [['selection', 100], ['selection', 105]]);
+
+  const switching = stage();
+  switching.ticks.update(A, false);
+  switching.to(105);
+  switching.ticks.update(B, false);
+  switching.to(115);
+  same('picking another section for the same bar ticks, with one landing', switching.kinds(), ['selection', 'selection', 'prepare', 'landing']);
+
+  const otherSong = stage();
+  otherSong.ticks.update(A, false);
+  otherSong.to(105);
+  otherSong.ticks.update({ idx: 2, at: 108 }, false);
+  otherSong.to(115);
+  same('the same section number on another bar is a new pick, as in another song', otherSong.world.fired, [['selection', 100], ['selection', 105], ['prepare', r3(108 - LAG - 1)], ['landing', r3(108 - LAG)]]);
+
+  const close = stage();
+  close.ticks.update({ idx: 1, at: 100.5 }, false);
+  close.to(101);
+  same('a landing under a second away wakes the engine at once', close.world.fired, [['selection', 100], ['prepare', 100], ['landing', r3(100.5 - LAG)]]);
+
+  const pausing = stage();
+  pausing.ticks.update(A, false);
+  pausing.to(105);
+  pausing.ticks.update(A, true);
+  pausing.to(115);
+  same('no landing tick while paused', pausing.kinds(), ['selection']);
+
+  const stopped = stage();
+  stopped.ticks.update({ idx: 2, at: 103 }, false);
+  stopped.ticks.update({ idx: 2, at: 103 }, true);
+  stopped.ticks.update({ idx: 2, at: 103 }, false);
+  stopped.to(104);
+  same('a pause taken back still gets its one landing', stopped.world.fired, [['selection', 100], ['prepare', r3(103 - LAG - 1)], ['landing', r3(103 - LAG)]]);
+
+  const again = stage();
+  again.ticks.update(A, false);
+  again.to(110 - LAG);
+  again.ticks.update(A, true);
+  again.ticks.update(A, false);
+  again.to(110 - LAG + 0.02);
+  again.ticks.update(A, false);
+  same('setting the timer again after the tick does not repeat it', again.kinds(), ['selection', 'prepare', 'landing']);
+
+  const asleep = stage();
+  asleep.ticks.update(A, false);
+  asleep.sleep(125);
+  asleep.ticks.update(null, false);
+  same('a timer that wakes long after the landing stays quiet, and so does the empty queue', asleep.kinds(), ['selection']);
+
+  const slow = stage();
+  slow.ticks.update({ idx: 1, at: 100.5 }, false);
+  slow.sleep(100.5 + 0.03);
+  same('a timer a little late still ticks', slow.kinds(), ['selection', 'prepare', 'landing']);
+
+  const off = stage();
+  off.world.ready = false;
+  off.ticks.update(A, false);
+  off.to(105);
+  off.ticks.update(null, false);
+  off.ticks.update(B, false);
+  off.to(115);
+  same('with Haptics off or the app behind, nothing fires', off.kinds(), []);
+
+  // Sound through Bluetooth arrives late, so the tick waits for it, past the moment the queue empties.
+  const wireless = stage({ latency: 0.2 });
+  wireless.ticks.update(A, false);
+  wireless.to(110.02);
+  wireless.ticks.update(null, false);
+  wireless.ticks.update(null, false);
+  wireless.to(111);
+  same('a landing keeps its timer after the queue empties', wireless.world.fired.at(-1), ['landing', r3(110 + 0.2 - LAG)]);
+
+  const arrival = stage();
+  arrival.ticks.update(A, false);
+  arrival.to(110.01);
+  arrival.ticks.update({ idx: 4, at: 118 }, false);
+  arrival.to(120);
+  same('a second pick waiting behind an arrival ticks as the arrival lands, and each lands once', arrival.kinds(), ['selection', 'prepare', 'landing', 'selection', 'prepare', 'landing']);
+
+  const finished = stage();
+  finished.ticks.update(A, false);
+  finished.ticks.stop();
+  finished.to(115);
+  same('leaving Perform calls off the landing', finished.kinds(), ['selection']);
+
+  const song = (next: object | null, arriving = false) => ({ next, arriving }) as never;
+  const landing = { idx: 3, bars: 1, beats: 4, landingCtx: 50 };
+  same('a picked section is queued', haptics.queuedSection(song({ ...landing, reason: 'pick' }), undefined), { idx: 3, at: 50 });
+  same('the section the plan goes to next is not', haptics.queuedSection(song({ ...landing, reason: 'plan' }), undefined), null);
+  same('nor is a loop on hold', haptics.queuedSection(song({ ...landing, reason: 'hold' }), undefined), null);
+  same('nothing playing, nothing queued', haptics.queuedSection(null as never, undefined), null);
+  same('a section of another song still coming in is queued', haptics.queuedSection(song(null, true), { idx: 1, reason: 'pick', landingCtx: 40 }), { idx: 1, at: 40 });
+  same('and comes ahead of a pick behind it', haptics.queuedSection(song({ ...landing, reason: 'pick' }, true), { idx: 1, reason: 'pick', landingCtx: 40 }), { idx: 1, at: 40 });
+  same('a song starting from the plan is not queued', haptics.queuedSection(song(null, true), { idx: 0, reason: 'plan', landingCtx: 40 }), null);
+
+  same('Haptics is on when the saved settings predate it', normalizeSettings({ analyticsEnabled: false }).hapticsEnabled, true);
+  same('it stays off once turned off', normalizeSettings({ hapticsEnabled: false }).hapticsEnabled, false);
+  same('a broken value turns it off', normalizeSettings({ hapticsEnabled: 'yes' }).hapticsEnabled, false);
+}
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);

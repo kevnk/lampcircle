@@ -1,5 +1,6 @@
 import type { DjwMap } from '../lib/djw';
 import type { DisplayCue } from '../lib/lyricsCue';
+import type { HapticKind } from '../lib/haptics';
 import type { CaptionTrack } from '../lib/lyricsFetch';
 import type { MonitorInfo } from '../lib/lyricsWindow';
 
@@ -13,6 +14,8 @@ export type Settings = {
   openAtLaunch: 'last-session' | 'nothing';
   /** Open at login through the Tauri autostart plugin's macOS LaunchAgent. */
   openAtLogin: boolean;
+  /** Perform's ticks on iPhone and iPad. */
+  hapticsEnabled: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -20,6 +23,7 @@ export const DEFAULT_SETTINGS: Settings = {
   crashReportingEnabled: false,
   openAtLaunch: 'last-session',
   openAtLogin: false,
+  hapticsEnabled: true,
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -35,6 +39,7 @@ export function normalizeSettings(value: unknown): Settings {
     crashReportingEnabled: flag('crashReportingEnabled'),
     openAtLaunch: stored.openAtLaunch === 'nothing' ? 'nothing' : 'last-session',
     openAtLogin: flag('openAtLogin'),
+    hapticsEnabled: flag('hapticsEnabled'),
   };
 }
 
@@ -132,8 +137,18 @@ export type Mobile = {
   pickImportFiles(): Promise<File[]>;
   /** Keeps the screen on, for Perform. */
   setKeepAwake(enabled: boolean): Promise<void>;
+  /** A tick from the Taptic Engine, if the app is in front. */
+  haptic(kind: HapticKind): Promise<void>;
+  /** Takes the audio session from other apps while Lamp Circle plays, and gives it back after. Done when iOS has answered. */
+  setAudioPlaying(playing: boolean): Promise<void>;
+  /** The headphones or a cable came out. */
+  onAudioPause(handler: () => void): () => void;
+  /** Something cut off the app's audio session. It may only be WebKit's own session starting. */
+  onAudioInterrupted(handler: () => void): () => void;
   /** Debug builds only: the files in <app data>/dev-seed, once, and route.txt. Rejects in a release build. */
   takeDevSeed(): Promise<{ files: File[]; route?: string }>;
+  /** Stages a library backup in the app, then opens iOS's save dialog. False when the person cancels. */
+  saveBackup(file: Blob, name: string, onProgress: (part: number) => void): Promise<boolean>;
 };
 
 export const isTauri = (): boolean => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
