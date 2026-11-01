@@ -3,13 +3,16 @@ import { ListMusic, ListOrdered, Play, Share } from 'lucide-react';
 import type { JumpAt, Song, WorshipSet } from '../types';
 import { go, parseRoute, useStore, type Route } from '../store';
 import { Button, Card, SongHeader, StepPills, beatsLabel } from '../ui';
-import { audio } from '../audio/engine';
+import { audio, audioHolders } from '../audio/engine';
 import { mobile, platform } from '../platform';
 import { serializeDjw } from '../lib/djw';
 import { fileNameFor } from '../lib/library';
 import { bpmOf, checks, isReady, keysText, sectionViews, songGrid, songKeys, uid } from '../lib/songMap';
 import { openFiles } from '../screens/Library';
 import { doneSteps, stepNav } from '../screens/SongTap';
+
+/** Milliseconds WebKit gets to stop the audio clock after iOS reports an interruption. */
+const INTERRUPTION_CHECK = 500;
 
 /**
  * The iPhone and iPad app's own wiring, mounted only there: audio that wakes on the first tap,
@@ -18,6 +21,7 @@ import { doneSteps, stepNav } from '../screens/SongTap';
 export function Mobile() {
   const { loaded, saveSet } = useStore();
   useEffect(() => wakeAudioOnTap(), []);
+  useEffect(() => followAudioSession(), []);
   useEffect(() => {
     rememberSet();
     window.addEventListener('hashchange', rememberSet);
@@ -40,10 +44,36 @@ function wakeAudioOnTap(): () => void {
     silence.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
     silence.connect(ctx.destination);
     silence.start();
-    void ctx.resume().then(() => ctx.state === 'running' && stop());
+    void ctx.resume().then(() => {
+      if (ctx.state !== 'running') return;
+      stop();
+      audioHolders.unlocked();
+    });
   }
   events.forEach(type => window.addEventListener(type, wake, true));
   return stop;
+}
+
+/** Other apps' music plays on until Lamp Circle plays. iOS stops it for a phone call or when the headphones come out. */
+function followAudioSession(): () => void {
+  void mobile.setAudioPlaying(false);
+  const stopPause = mobile.onAudioPause(() => audioHolders.pauseAll());
+  // WebKit's own session can cut off the app's just by starting, and that is no reason to stop the music. A real call stops the audio clock too.
+  // ponytail: a fixed wait for WebKit to catch up. A phone test may show the wait needs changing, or that this check can go.
+  const stopInterrupted = mobile.onAudioInterrupted(() => {
+    window.setTimeout(() => {
+      if (audio().ctx.state !== 'running') audioHolders.interrupted();
+    }, INTERRUPTION_CHECK);
+  });
+  const back = () => {
+    if (!document.hidden) audioHolders.wake();
+  };
+  document.addEventListener('visibilitychange', back);
+  return () => {
+    stopPause();
+    stopInterrupted();
+    document.removeEventListener('visibilitychange', back);
+  };
 }
 
 const LAST_SET = 'lampcircle.lastSet';

@@ -1,5 +1,5 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { emit, listen } from '@tauri-apps/api/event';
 import type { CaptionTrack } from '../lib/lyricsFetch';
 import { normalizeSettings, type Desktop, type DiagnosticsExport, type Job, type LastSession, type Mobile, type Platform, type UpdateCheck, type UpdateProgress } from './types';
 
@@ -67,8 +67,20 @@ export function unpack(body: ArrayBuffer): { files: File[]; route?: string } {
   return { files, route: header.route };
 }
 
+/** Each emit is its own command and could overtake the last, so they wait in line. */
+let audioSession: Promise<void> = Promise.resolve();
+
 export const mobile: Mobile = {
   pickImportFiles: async () => unpack(await invoke<ArrayBuffer>('pick_import_files')).files,
   setKeepAwake: enabled => invoke<void>('set_keep_awake', { enabled }),
+  setAudioPlaying(playing) {
+    // Web Audio may run under WebKit's own session and not the app's, so ask WebKit for the same thing. iOS 16.4 and later.
+    const webkit = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+    if (webkit) webkit.type = playing ? 'playback' : 'ambient';
+    audioSession = audioSession.then(() => emit('audio-playing', playing)).catch(error => console.warn('Could not change the audio session', error));
+    return audioSession;
+  },
+  onAudioPause: handler => onEvent<null>('audio-pause', handler),
+  onAudioInterrupted: handler => onEvent<null>('audio-interrupted', handler),
   takeDevSeed: async () => unpack(await invoke<ArrayBuffer>('take_dev_seed')),
 };

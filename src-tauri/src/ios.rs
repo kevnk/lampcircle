@@ -130,29 +130,148 @@ pub async fn take_dev_seed(app: AppHandle) -> Result<Response> {
     Ok(Response::new(frame(route, files)?))
 }
 
-/// Playback keeps the music going with the ring/silent switch on, and, with UIBackgroundModes audio,
-/// when the screen locks. The page pads itself with env(safe-area-inset-*), so the web view must not inset it too.
+/// The audio session. Until Lamp Circle plays it is Ambient and inactive, so other apps' music plays on, even
+/// after the first tap wakes the page's audio. While it plays it leads: Playback stops other apps' music and
+/// keeps going with the ring/silent switch on and, with UIBackgroundModes audio, when the screen locks.
+#[cfg(target_os = "ios")]
+mod audio_session {
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyObject, NSObject};
+    use objc2::{class, define_class, msg_send, sel, AnyThread, DefinedClass};
+    use objc2_avf_audio::{
+        AVAudioSession, AVAudioSessionCategoryAmbient, AVAudioSessionCategoryPlayback,
+        AVAudioSessionInterruptionNotification, AVAudioSessionInterruptionType,
+        AVAudioSessionInterruptionTypeKey, AVAudioSessionRouteChangeNotification,
+        AVAudioSessionRouteChangeReason, AVAudioSessionRouteChangeReasonKey,
+        AVAudioSessionSetActiveOptions,
+    };
+    use tauri::{AppHandle, Emitter, Listener};
+
+    fn set_playing(playing: bool) {
+        // SAFETY: the shared session and Apple's category constants, used as documented.
+        let changed = unsafe {
+            let session = AVAudioSession::sharedInstance();
+            if playing {
+                match AVAudioSessionCategoryPlayback {
+                    Some(playback) => session
+                        .setCategory_error(playback)
+                        .and_then(|()| session.setActive_error(true)),
+                    None => Ok(()),
+                }
+            } else {
+                // iOS deactivates even when this reports audio still running, so the category changes either way.
+                let inactive = session.setActive_withOptions_error(
+                    false,
+                    AVAudioSessionSetActiveOptions::NotifyOthersOnDeactivation,
+                );
+                let ambient = match AVAudioSessionCategoryAmbient {
+                    Some(ambient) => session.setCategory_error(ambient),
+                    None => Ok(()),
+                };
+                inactive.and(ambient)
+            }
+        };
+        if let Err(error) = changed {
+            log::warn!("Could not change the audio session: {error:?}");
+        }
+    }
+
+    /// A number in a notification's userInfo.
+    ///
+    /// # Safety
+    /// `note` must be an NSNotification.
+    unsafe fn info_number(note: &AnyObject, key: Option<&AnyObject>) -> Option<usize> {
+        let info: Option<Retained<AnyObject>> = msg_send![note, userInfo];
+        let number: Option<Retained<AnyObject>> = msg_send![&*info?, objectForKey: key?];
+        Some(msg_send![&*number?, unsignedIntegerValue])
+    }
+
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[name = "LampCircleAudioObserver"]
+        #[ivars = AppHandle]
+        struct Observer;
+
+        impl Observer {
+            /// The page pauses when a call starts and stays paused when it ends, whatever iOS suggests:
+            /// music coming back by itself after a call is the worse surprise in a live set.
+            /// Only the page can tell a call from WebKit's own session starting, so it decides.
+            #[unsafe(method(interrupted:))]
+            fn interrupted(&self, note: &AnyObject) {
+                // SAFETY: NSNotificationCenter passes an NSNotification, and this is Apple's key.
+                let kind = unsafe {
+                    info_number(note, AVAudioSessionInterruptionTypeKey.map(|key| &***key))
+                };
+                if kind == Some(AVAudioSessionInterruptionType::Began.0) {
+                    self.tell_page("audio-interrupted");
+                }
+            }
+
+            /// The headphones or the cable to the sound desk came out. Music must not jump to the phone's speaker.
+            #[unsafe(method(routeChanged:))]
+            fn route_changed(&self, note: &AnyObject) {
+                // SAFETY: NSNotificationCenter passes an NSNotification, and this is Apple's key.
+                let reason = unsafe {
+                    info_number(note, AVAudioSessionRouteChangeReasonKey.map(|key| &***key))
+                };
+                if reason == Some(AVAudioSessionRouteChangeReason::OldDeviceUnavailable.0) {
+                    self.tell_page("audio-pause");
+                }
+            }
+        }
+    );
+
+    impl Observer {
+        fn tell_page(&self, event: &str) {
+            if let Err(error) = self.ivars().emit_to("main", event, ()) {
+                log::warn!("Could not send {event} to the page: {error}");
+            }
+        }
+    }
+
+    pub fn start(app: &tauri::App) {
+        // The page's emit is an async command, so activating blocks a worker and not the main thread.
+        // Its promise settles after this returns, which lets the page wait for the session before starting audio.
+        app.listen("audio-playing", |event| {
+            objc2::rc::autoreleasepool(|_| set_playing(event.payload() == "true"));
+        });
+
+        let observer = Observer::alloc().set_ivars(app.handle().clone());
+        // SAFETY: NSObject's init, and NSNotificationCenter's own selectors with arguments of the types it takes.
+        unsafe {
+            let observer: Retained<Observer> = msg_send![super(observer), init];
+            let center: Retained<AnyObject> =
+                msg_send![class!(NSNotificationCenter), defaultCenter];
+            let session = AVAudioSession::sharedInstance();
+            let _: () = msg_send![
+                &center,
+                addObserver: &*observer,
+                selector: sel!(interrupted:),
+                name: AVAudioSessionInterruptionNotification,
+                object: &*session
+            ];
+            let _: () = msg_send![
+                &center,
+                addObserver: &*observer,
+                selector: sel!(routeChanged:),
+                name: AVAudioSessionRouteChangeNotification,
+                object: &*session
+            ];
+            // The center does not keep it alive, and it listens for as long as the app runs.
+            std::mem::forget(observer);
+        }
+    }
+}
+
+/// The page pads itself with env(safe-area-inset-*), so the web view must not inset it too.
 #[cfg(target_os = "ios")]
 pub fn setup(app: &tauri::App) {
     use objc2::msg_send;
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
-    use objc2_avf_audio::{AVAudioSession, AVAudioSessionCategoryPlayback};
     use objc2_ui_kit::{UIScrollView, UIScrollViewContentInsetAdjustmentBehavior};
 
-    // SAFETY: the shared session and Apple's category constant, used as documented.
-    unsafe {
-        let session = AVAudioSession::sharedInstance();
-        let started = match AVAudioSessionCategoryPlayback {
-            Some(playback) => session
-                .setCategory_error(playback)
-                .and_then(|()| session.setActive_error(true)),
-            None => Ok(()),
-        };
-        if let Err(error) = started {
-            log::warn!("Could not start the audio session: {error:?}");
-        }
-    }
+    audio_session::start(app);
 
     let Some(window) = app.get_webview_window("main") else {
         return;

@@ -975,6 +975,147 @@ same('with a 4-beat lead, a late pick puts the Chorus up at once, and cancelling
   ['Verse c', 11.1, 500],
 ]);
 
+// iPhone and iPad: who holds the audio session.
+const { AudioHolders } = await import('../src/audio/holders.ts');
+function holdersWith(options: { rest?: () => Promise<unknown>; claim?: () => Promise<unknown> } = {}) {
+  const log: string[] = [];
+  const holders = new AudioHolders(
+    {
+      claim: () => {
+        log.push('claim');
+        return options.claim?.() ?? Promise.resolve();
+      },
+      giveBack: () => log.push('give back'),
+      run: () => log.push('run'),
+      rest: () => {
+        log.push('rest');
+        return options.rest?.() ?? Promise.resolve();
+      },
+    },
+    0,
+  );
+  return { log, holders };
+}
+const nextTimers = () => new Promise(done => setTimeout(done, 5));
+const player = (paused = false) => ({ paused, pauses: 0, pause() { this.pauses++; } });
+{
+  const { log, holders } = holdersWith();
+  const a = player();
+  holders.hold(a);
+  await nextTimers();
+  same('playing takes the session, then starts the clock', log, ['claim', 'run']);
+  holders.letGo(a);
+  same('stopping gives nothing back straight away', log, ['claim', 'run']);
+  await nextTimers();
+  same('after the wait the clock rests, then the session goes back', log, ['claim', 'run', 'rest', 'give back']);
+  holders.hold(a);
+  await nextTimers();
+  same('playing again takes it back', log.slice(-2), ['claim', 'run']);
+}
+{
+  let sessionIsOurs = () => {};
+  const { log, holders } = holdersWith({ claim: () => new Promise<void>(done => (sessionIsOurs = done)) });
+  const [a, b] = [player(), player()];
+  holders.hold(a);
+  holders.hold(b);
+  await nextTimers();
+  same('the clock waits for the session, and it is taken once', log, ['claim']);
+  holders.letGo(b);
+  sessionIsOurs();
+  await nextTimers();
+  same('then it starts for what still plays', log, ['claim', 'run']);
+}
+{
+  const { log, holders } = holdersWith();
+  const a = player();
+  holders.hold(a);
+  holders.letGo(a);
+  holders.hold(a);
+  await nextTimers();
+  same('a seek or short pause keeps the session, and never takes it again', log, ['claim', 'run', 'run']);
+  holders.hold(player());
+  await nextTimers();
+  same('a pad or a new song under the same session does not take it again', log.filter(item => item === 'claim').length, 1);
+}
+{
+  const { log, holders } = holdersWith();
+  const pausedFirst = player(true);
+  holders.hold(pausedFirst);
+  await nextTimers();
+  same('paused before the session arrives, the clock stays stopped', log, ['claim']);
+}
+{
+  const { log, holders } = holdersWith();
+  const [a, b] = [player(), player()];
+  holders.hold(a);
+  holders.hold(b);
+  holders.letGo(a);
+  await nextTimers();
+  same('the session stays while anything still plays', log.includes('rest'), false);
+  holders.letGo(b);
+  await nextTimers();
+  same('and goes back when the last one stops', log.slice(-2), ['rest', 'give back']);
+}
+{
+  let finishRest = () => {};
+  const { log, holders } = holdersWith({ rest: () => new Promise<void>(done => (finishRest = done)) });
+  const a = player();
+  holders.hold(a);
+  await nextTimers();
+  holders.letGo(a);
+  await nextTimers();
+  holders.hold(a);
+  await nextTimers();
+  finishRest();
+  await nextTimers();
+  same('playing again while the clock is stopping keeps the session', log, ['claim', 'run', 'rest', 'run']);
+}
+{
+  const { log, holders } = holdersWith();
+  holders.letGo(player());
+  await nextTimers();
+  same('leaving Perform without playing leaves the session alone', log, []);
+}
+{
+  const { log, holders } = holdersWith();
+  holders.unlocked();
+  await nextTimers();
+  same('the first tap rests the clock and takes no session', log, ['rest']);
+  const playing = holdersWith();
+  playing.holders.hold(player());
+  playing.holders.unlocked();
+  await nextTimers();
+  same('a first tap that started playback leaves the clock running', playing.log, ['claim', 'run']);
+}
+{
+  const { log, holders } = holdersWith();
+  const [paused, playing] = [player(true), player()];
+  holders.hold(paused);
+  await nextTimers();
+  log.length = 0;
+  holders.wake();
+  same('coming back to a paused set leaves the clock stopped', log, []);
+  holders.hold(playing);
+  await nextTimers();
+  log.length = 0;
+  holders.wake();
+  same('coming back to a playing set starts the clock', log, ['run']);
+  log.length = 0;
+  holders.pauseAll();
+  same('unplugged headphones pause everything', [paused.pauses, playing.pauses], [1, 1]);
+  await nextTimers();
+  same('a pause alone keeps the session, so a pause for prayer does not give it back', log, []);
+  holders.hold(playing);
+  await nextTimers();
+  same('so playing on does not take it again', log, ['run']);
+  log.length = 0;
+  holders.interrupted();
+  same('a call pauses everything too', [paused.pauses, playing.pauses], [2, 2]);
+  holders.hold(playing);
+  await nextTimers();
+  same('and after a call, playing takes the session back first', log, ['claim', 'run']);
+}
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);

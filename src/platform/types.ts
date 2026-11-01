@@ -117,6 +117,12 @@ export type Mobile = {
   pickImportFiles(): Promise<File[]>;
   /** Keeps the screen on, for Perform. */
   setKeepAwake(enabled: boolean): Promise<void>;
+  /** Takes the audio session from other apps while Lamp Circle plays, and gives it back after. Done when iOS has answered. */
+  setAudioPlaying(playing: boolean): Promise<void>;
+  /** The headphones or a cable came out. */
+  onAudioPause(handler: () => void): () => void;
+  /** Something cut off the app's audio session. It may only be WebKit's own session starting. */
+  onAudioInterrupted(handler: () => void): () => void;
   /** Debug builds only: the files in <app data>/dev-seed, once, and route.txt. Rejects in a release build. */
   takeDevSeed(): Promise<{ files: File[]; route?: string }>;
 };
