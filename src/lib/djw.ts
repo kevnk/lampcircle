@@ -20,6 +20,8 @@ const JUMPS: JumpAt[] = ['beat', 'bar', 'phrase', 'section'];
 /** A lyrics slide that is just this is a deliberate blank. */
 const BLANK = '-';
 const round = (t: number) => Math.round(t * 1000) / 1000;
+/** A map can't open without a title, and the Song name field can be left empty. */
+const UNTITLED = 'Untitled';
 
 export function serializeDjw(song: Song, options: { includeAudioPath: boolean }): string {
   const grid = songGrid(song);
@@ -32,7 +34,7 @@ export function serializeDjw(song: Song, options: { includeAudioPath: boolean })
   return stringify({
     djw: 2,
     song: {
-      title: song.title,
+      title: song.title.trim() || UNTITLED,
       ...(song.artist ? { artist: song.artist } : {}),
       meter: `${song.beatsPerBar}/${song.beatsPerBar === 6 ? 8 : 4}`,
       ...(Object.keys(audio).length ? { audio } : {}),
@@ -117,7 +119,7 @@ export function parseDjw(text: string, warnings?: string[]): DjwMap {
   });
   const lastEnd = rows.length ? num(record(rows[rows.length - 1], 'last section').end_bar, 'end_bar') : 0;
   return {
-    title: text_(song.title, 'song.title'),
+    title: song.title === '' ? UNTITLED : text_(song.title, 'song.title'),
     artist: typeof song.artist === 'string' ? song.artist : '',
     beatsPerBar,
     ...(typeof audio.file === 'string' ? { audioFile: audio.file } : {}),

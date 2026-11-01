@@ -5,9 +5,9 @@ import { go, useStore } from '../store';
 import { Button, Card, LinkButton, SongHeader, StepPills } from '../ui';
 import { serializeDjw } from '../lib/djw';
 import { fileNameFor } from '../lib/library';
-import { platform } from '../platform';
+import { isTauri, platform } from '../platform';
 import { bpmOf, checks, keysText, songGrid, songKeys } from '../lib/songMap';
-import { doneSteps, stepNav } from './SongTap';
+import { doneSteps, focusedSection, stepNav } from './SongTap';
 
 type DirectoryPicker = () => Promise<FileSystemDirectoryHandle>;
 
@@ -16,7 +16,9 @@ export function Export({ song }: { song: Song }) {
   const list = checks(song);
   const passing = list.filter(check => check.ok).length;
   const [open, setOpen] = useState(false);
-  const [fileName, setFileName] = useState(fileNameFor(song.title));
+  /** Follows the song's name until you type your own. */
+  const [typedName, setTypedName] = useState<string | null>(null);
+  const fileName = typedName ?? fileNameFor(song.title);
   const [includePath, setIncludePath] = useState(false);
   const [folder, setFolder] = useState<FileSystemDirectoryHandle | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +28,8 @@ export function Export({ song }: { song: Song }) {
 
   const save = async () => {
     setError(null);
-    const name = fileName.endsWith('.djw') ? fileName : `${fileName}.djw`;
+    const stem = fileName.trim() || fileNameFor(song.title);
+    const name = stem.endsWith('.djw') ? stem : `${stem}.djw`;
     const text = serializeDjw(song, { includeAudioPath: includePath });
     try {
       if (folder) {
@@ -60,7 +63,13 @@ export function Export({ song }: { song: Song }) {
               <li key={check.id} className={check.ok ? 'text-muted' : ''}>
                 <span className={check.ok ? 'text-amber' : 'text-danger'}>{check.ok ? '✓' : '✗'}</span> {check.text}
                 {!check.ok && (
-                  <LinkButton className="ml-2 text-sm" onClick={() => stepNav(song)(check.fix === 'set' || check.fix === 'done' ? 'export' : check.fix)}>
+                  <LinkButton
+                    className="ml-2 text-sm"
+                    onClick={() => {
+                      if (check.sectionId) focusedSection.set(song.id, check.sectionId);
+                      stepNav(song)(check.fix === 'set' || check.fix === 'done' ? 'export' : check.fix);
+                    }}
+                  >
                     Fix
                   </LinkButton>
                 )}
@@ -85,13 +94,14 @@ export function Export({ song }: { song: Song }) {
             </label>
             <label className="text-sm">
               File name
-              <input name="fileName" className="mt-1 w-full rounded-full border border-faint bg-well px-4 py-2" value={fileName} onChange={event => setFileName(event.target.value)} />
+              <input name="fileName" className="mt-1 w-full rounded-full border border-faint bg-well px-4 py-2" value={fileName} onChange={event => setTypedName(event.target.value)} />
             </label>
             <div className="text-sm">
               Folder
               <p className="mt-1 flex items-center gap-3 py-2">
-                <span className="font-medium">{folder?.name ?? 'Downloads'}</span>
-                {picker && (
+                {/* The apps save through the system's Save window, which has its own folder list. */}
+                <span className="font-medium">{isTauri() ? 'You choose it in the Save window' : (folder?.name ?? 'Downloads')}</span>
+                {picker && !isTauri() && (
                   <LinkButton
                     className="text-sm"
                     onClick={() =>

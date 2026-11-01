@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, Menu as Handle, X } from 'lucide-react';
 import type { Song, WorshipSet } from '../types';
 import { go, useStore } from '../store';
 import { isIOS } from '../platform';
-import { Button, Card, LinkButton, Menu, MenuItem, RestingBars } from '../ui';
+import { Button, Card, LinkButton, Menu, MenuItem, RestingBars, ask } from '../ui';
 import { KEY_NAMES, padFit, padGroups, route, tempoNote } from '../lib/music';
 import { bpmOf, isReady, keyOf, keysText, planSeconds, planText, songGrid, songKeys } from '../lib/songMap';
 
@@ -117,8 +117,10 @@ export function Sets({ id }: { id?: string }) {
             <MenuItem onClick={() => go({ page: 'sets', id: store.newSet().id })}>New set</MenuItem>
             <MenuItem
               danger
-              onClick={() => {
-                if (confirm(`Delete ${set.name}? The songs stay in your library.`)) void store.removeSet(set.id).then(() => go({ page: 'sets' }));
+              onClick={async () => {
+                if (!(await ask(`Delete ${set.name}? The songs stay in your library.`, 'Delete'))) return;
+                await store.removeSet(set.id);
+                go({ page: 'sets' });
               }}
             >
               Delete set

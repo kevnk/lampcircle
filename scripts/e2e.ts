@@ -120,11 +120,16 @@ async function mapRest() {
 }
 const seek = (t: number) => ev(`__djw.engine.transport.seek(${t})`);
 
+/** Taps count while the song plays. Each tap jumps to its beat first, so the run takes no longer than the presses. */
 async function tapIn(beats: number[], count: number) {
+  await waitFor(`!document.body.innerText.includes('Listening to the song')`, 'the song is ready to tap');
+  const wasPlaying = await ev<boolean>('__djw.engine.transport.playing');
+  await ev('__djw.engine.transport.play()');
   for (const [i, t] of beats.slice(0, count).entries()) {
     await seek(t);
     await press(' ', i % 4 === 0);
   }
+  if (!wasPlaying) await ev('__djw.engine.transport.pause()');
 }
 
 async function main() {
@@ -177,16 +182,51 @@ async function main() {
     const sortedA = mappedA.map(tap => tap.t).sort((a, b) => a - b);
     check('mapping adds no beats between the clicks', sortedA.every((t, i) => i === 0 || t - sortedA[i - 1] > 0.45));
     await press(' ');
-    check('Space while a button has focus taps instead of pressing it', (await text()).includes('Mapped from the song'));
-    await press('Backspace');
+    check('Space while stopped starts the song and adds no beat, even with a button focused', (await ev<boolean>('__djw.engine.transport.playing')) && (await text()).includes('Mapped from the song'));
+    await ev('__djw.engine.transport.pause()');
     const keysFor = ['1', '2', '4', '2', '4', '8'];
     for (const [i, key] of keysFor.entries()) {
       await seek(SONG_A.firstDownbeat + i * 8 + 0.3);
       await press(key);
     }
-    await click('More');
     await click('Run Outro to the end');
     await waitFor(`!document.body.innerText.includes('[next mark]')`, 'outro runs to the end');
+
+    // Questions are asked in the page: window.confirm says yes without asking in the Mac app, and window.prompt gives nothing back.
+    await click('More');
+    await click('Delete song');
+    await waitFor(`document.querySelector('dialog[open]')?.innerText.includes('Delete Morning Test')`, 'deleting a song asks first');
+    await press('1');
+    check('shortcuts stand down while a question is open', (await ev<string>('document.activeElement.textContent')) === 'Cancel');
+    await click('Cancel', 'dialog button');
+    await waitFor(`!document.querySelector('dialog')`, 'Cancel closes the question');
+    check('Cancel keeps the song', (await ev<string>('location.hash')).endsWith('/tap') && (await text()).includes('Morning Test'));
+    await ev(`(() => { const s = document.querySelector('select[aria-label^="Label of"]'); s.value = 'custom'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await waitFor(`document.querySelector('dialog[open] input')`, 'a custom label asks for its name');
+    await page.send('Input.insertText', { text: 'Spontaneous' });
+    await click('Name it', 'dialog button');
+    await waitFor(`document.querySelector('select[aria-label="Label of Spontaneous"]')`, 'the name from the question labels the section');
+    await press('Backspace');
+    await waitFor(`!document.querySelector('select[aria-label="Label of Spontaneous"]')`, 'Backspace takes the name back');
+
+    // A 1 on the beat you stopped at moves no beat and adds none.
+    const beatCount = `document.querySelectorAll('svg[viewBox="0 0 1000 14"] line').length`;
+    const countBefore = await ev<number>(beatCount);
+    await seek(beatTimes(SONG_A)[6] + 0.1);
+    await press(' ', true);
+    await waitFor(`document.body.innerText.includes('That beat is a 1 now')`, 'Shift+Space while stopped marks a 1');
+    check('the bars count from the new 1', /beat 1$/.test(await ev<string>(`document.querySelector('p.tabular.text-xl').innerText`)));
+    check('marking a 1 adds no beat', (await ev<number>(beatCount)) === countBefore);
+    await press('Backspace');
+
+    // The bars before the first section can be repaired where Export's Fix lands.
+    await clickAt(`document.querySelector('[aria-label="Remove Intro"]')`);
+    await waitFor(`document.body.innerText.includes('Bars 1–4 are not in a section')`, 'bars before the first section are named');
+    await click('Add an Intro');
+    await waitFor(`!document.body.innerText.includes('are not in a section') && document.querySelector('select[aria-label="Label of Intro"]')`, 'Add an Intro covers them');
+    await press('Backspace');
+    await press('Backspace');
+    await waitFor(`document.querySelector('select[aria-label="Label of Intro"]') && !document.body.innerText.includes('are not in a section')`, 'Backspace brings the first Intro back');
     const labels = () => ev<string[]>(`[...document.querySelectorAll('select[aria-label^="Label of"]')].map(s => s.selectedOptions[0].text)`);
     const names = await labels();
     check('section names', JSON.stringify(names) === JSON.stringify(['Intro', 'Verse 1', 'Chorus 1', 'Verse 2', 'Chorus 2', 'Outro']), names);
@@ -429,7 +469,6 @@ async function main() {
     await press('1');
     await seek(SONG_B.firstDownbeat + 16.3);
     await press('4');
-    await click('More');
     await click('Run Chorus to the end');
     await waitFor(`document.body.innerText.includes('60.0 BPM')`, 'evening tempo 60 BPM');
     await click('Next: Transitions');

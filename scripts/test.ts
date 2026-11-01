@@ -1398,6 +1398,132 @@ same('the display delay is saved with lead and fade: held to its range, and savi
   { leadBeats: 3, fadeBeats: 0 },
 ]);
 
+// Tap and Prep: one song, start to finish.
+{
+  const blank = (over: Partial<import('../src/types.ts').Song> = {}): import('../src/types.ts').Song => ({
+    id: 'tp',
+    title: 'Song',
+    artist: '',
+    duration: 60,
+    peaks: [],
+    chroma: [],
+    beatsPerBar: 4,
+    taps: [],
+    fill: false,
+    sections: [],
+    marksEnd: 0,
+    refined: false,
+    updatedAt: 0,
+    addedAt: 0,
+    ...over,
+  });
+  // 12 beats at 120 BPM from 1.0: bars at 1, 3, 5, and the grid stops at 6.5.
+  const tapped = Array.from({ length: 12 }, (_, i) => ({ t: 1 + i * 0.5, one: i % 4 === 0 }));
+  const names = (song: import('../src/types.ts').Song) => map.sectionViews(song).map(view => view.name);
+
+  // Marks past the tapped bars: they used to rename one section over and over.
+  let song = blank({ taps: tapped });
+  same('a mark is past the bars from half a bar after the last one, not before', [map.pastBars(song, 5.9), map.pastBars(song, 6), map.pastBars(song, 40)], [false, true, true]);
+  same('a song with no room for another bar has no marks past it', map.pastBars(blank({ taps: tapped, duration: 6.5 }), 6.4), false);
+  same('a song with no taps has no bars to be past', map.pastBars(blank(), 40), false);
+  const waitingMark = map.markSection(map.markSection(blank({ taps: tapped, marksEnd: 60 }), 'intro', 1), 'outro', 40);
+  same('Export will not leave a waiting mark out', map.checks(waitingMark).find(check => check.id === 'sections')?.text, 'A section mark is past the last bar. Tap further or map the rest from the song.');
+  song = map.markSection(song, 'intro', 1);
+  song = map.markSection(song, 'verse', 20);
+  song = map.markSection(song, 'chorus', 36);
+  same('marks past the tapped bars each keep their own section', song.sections.map(item => item.type), ['intro', 'verse', 'chorus']);
+  same('and wait out of sight until there are bars for them', names(song), ['Intro']);
+  const longer = { ...song, taps: Array.from({ length: 110 }, (_, i) => ({ t: 1 + i * 0.5, one: i % 4 === 0 })) };
+  same('more taps land each waiting mark on its own bar', map.sectionViews(longer).map(view => [view.name, view.s + 1]), [['Intro', 1], ['Verse', 10], ['Chorus', 18]]);
+  same('a mark inside the bars still renames the section on that bar', map.markSection(map.markSection(blank({ taps: tapped }), 'intro', 1), 'verse', 1.1).sections.map(item => item.type), ['verse']);
+  const lastBar = map.markSection(blank({ taps: tapped, duration: 7 }), 'intro', 5);
+  same('in the last bar of a song, a late mark still renames, since no later bar can come', map.markSection(lastBar, 'outro', 6.4).sections.map(item => item.type), ['outro']);
+
+  // A song played to its end covers its last bars.
+  const heard = (marksEnd: number, duration = 60) => blank({ marksEnd, duration, sections: [{ id: 'a', type: 'verse', at: 1, pickupBeats: 0, fadeInBeats: 1, fadeOutBeats: 1, repeats: 1, jumpAt: 'phrase' }] });
+  same('listening extends the sections half a second at a time', [map.listenedTo(heard(10), 10.2).marksEnd, map.listenedTo(heard(10), 10.6).marksEnd], [10, 10.6]);
+  same('jumping ahead extends nothing', map.listenedTo(heard(10), 40).marksEnd, 10);
+  same('going back extends nothing', map.listenedTo(heard(10), 5).marksEnd, 10);
+  same('the end of the recording runs them out, even under half a second on', map.listenedTo(heard(59.7), 60).marksEnd, 60);
+  same('jumping to the end of the recording from far back does not', map.listenedTo(heard(10), 60).marksEnd, 10);
+  same('no sections, nothing to extend', map.listenedTo(blank({ marksEnd: 10 }), 10.6).marksEnd, 10);
+  // At 60 BPM, with the last bar starting 1.5 s from the end, stopping 0.3 s short failed export with that bar unmarked.
+  const short = blank({ duration: 17.5, taps: Array.from({ length: 17 }, (_, i) => ({ t: i, one: i % 4 === 0 })), sections: [{ id: 'a', type: 'verse', at: 0, pickupBeats: 0, fadeInBeats: 1, fadeOutBeats: 1, repeats: 1, jumpAt: 'phrase' }] });
+  const nearEnd = { ...short, marksEnd: short.duration - 0.3 };
+  same('stopping 0.3 s short leaves the last bars out', map.unmarked(nearEnd) !== null, true);
+  same('playing to the very end covers them', map.unmarked(map.listenedTo(nearEnd, short.duration)), null);
+
+  // Marking a 1 while stopped, on a grid that is already there.
+  const plain = blank({ taps: Array.from({ length: 16 }, (_, i) => ({ t: 1 + i * 0.5, one: false })) });
+  const onBeat3 = map.toggleOne(plain, 2)!;
+  const before = map.songGrid(plain);
+  const after = map.songGrid(onBeat3);
+  same('a stopped 1 goes on the nearest beat and adds no beat', [after.beats.length, r3(after.beats[2]), after.beatInBar[2]], [16, 2, 1]);
+  same('it moves no beat', after.beats, before.beats);
+  same('it counts the bars from there, both ways', after.beatInBar.slice(0, 7), [3, 4, 1, 2, 3, 4, 1]);
+  same('off the beat by under half, it still finds the nearest', map.songGrid(map.toggleOne(plain, 2.2)!).beatInBar[2], 1);
+  same('pressed again it comes off, back to counting from the first beat', map.songGrid(map.toggleOne(onBeat3, 2)!).beatInBar.slice(0, 2), [1, 2]);
+  same('with no beat nearby there is nothing to mark', [map.toggleOne(plain, 30), map.toggleOne(blank(), 2), map.toggleOne(blank({ taps: [{ t: 1, one: false }] }), 1)], [null, null, null]);
+  const doubled = blank({ taps: [...plain.taps, { t: 2.05, one: false }] });
+  same('a beat tapped twice clears both taps', map.songGrid(map.toggleOne(map.toggleOne(doubled, 2)!, 2)!).beatInBar[0], 1);
+  same('both taps of it get the mark', map.toggleOne(doubled, 2)!.taps.filter(tap => tap.one).map(tap => tap.t), [2, 2.05]);
+  const placed = blank({ taps: [{ t: 1, one: true }, { t: 1.5, one: false }, { t: 2, one: false, auto: true }, { t: 2.5, one: false, auto: true }] });
+  const confirmed = map.toggleOne(placed, 2)!;
+  same('a 1 on a beat the app placed makes it a tap', confirmed.taps[2], { t: 2, one: true });
+  same('so it survives turning mapping off', confirmed.taps.filter(tap => !tap.auto).length, 3);
+  // Beats between taps have no tap to mark, so one goes exactly where the beat is.
+  const gappy = blank({ taps: [...plain.taps.slice(0, 4), ...plain.taps.slice(8)] });
+  const gapBefore = map.songGrid(gappy);
+  const gapAfter = map.songGrid(map.toggleOne(gappy, 3.5)!);
+  same('a 1 on an evenly spaced beat keeps every beat in place', gapAfter.beats.map(r3), gapBefore.beats.map(r3));
+  same('and that beat is a 1', [gapBefore.tapped[5], gapAfter.tapped[5], gapAfter.beatInBar[5]], [false, true, 1]);
+  const filled = blank({ taps: plain.taps, fill: true, duration: 20 });
+  same('a 1 on a beat filled in past the taps keeps every beat in place', map.songGrid(map.toggleOne(filled, 0.5)!).beats.map(r3), map.songGrid(filled).beats.map(r3));
+
+  // Merged taps: every tap behind the beat counts, however close the next beat is.
+  const merged = blank({ duration: 5, taps: [0, 0.5, 1, 1.5, 1.68, 1.8, 2.3, 2.8, 3.3, 3.8].map(t => ({ t, one: t === 0 || t === 1.68 })) });
+  same('a 1 on a tap merged into a beat can be cleared', map.toggleOne(merged, 1.5)!.taps.filter(tap => tap.one).map(tap => tap.t), [0]);
+  const beside = blank({ duration: 5, taps: [0, 0.5, 1.05, 1.5, 2, 2.5, 3, 3.5].map(t => ({ t, one: false })).concat([{ t: 1, one: false, auto: true } as never]) });
+  same('a placed beat beside a tap does not move the beat', [map.songGrid(map.toggleOne(beside, 1.05)!).beats.map(r3)[2], map.songGrid(map.toggleOne(beside, 1.05)!).beats.length], [1.05, map.songGrid(beside).beats.length]);
+  same('and it stays a placed beat', map.toggleOne(beside, 1.05)!.taps.filter(tap => tap.auto).length, 1);
+
+  const twoPlaced = blank({ duration: 3, taps: [0, 0.5, 1, 1.1, 1.5, 2].map(t => ({ t, one: false, auto: true })) });
+  const unmapped = { ...twoPlaced, taps: map.toggleOne(twoPlaced, 1)!.taps.filter(tap => !tap.auto) };
+  same('two placed beats merged into one leave one tap when mapping is turned off', map.songGrid(unmapped).beats, [1]);
+
+  // The next bar comes from the beats there are, not a guess from the last gap alone.
+  const shortLast = blank({ duration: 9.8, taps: [...Array.from({ length: 19 }, (_, i) => ({ t: i * 0.5, one: false })), { t: 9.4, one: false }], sections: [{ id: 'a', type: 'verse', at: 0, pickupBeats: 0, fadeInBeats: 1, fadeOutBeats: 1, repeats: 1, jumpAt: 'phrase' }, { id: 'b', type: 'outro', at: 8.85, pickupBeats: 0, fadeInBeats: 1, fadeOutBeats: 1, repeats: 1, jumpAt: 'phrase' }], marksEnd: 9.8 });
+  same('a finished song keeps its last section when a short last beat ends it', names(shortLast), ['Verse', 'Outro']);
+
+  // A map saved with no title has to open again.
+  const titled = (title: string) => djw.parseDjw(djw.serializeDjw(blank({ title, taps: tapped }), { includeAudioPath: false }));
+  same('an emptied song name still saves a map that opens', [titled('').title, titled('   ').title, titled(' Way Maker ').title], ['Untitled', 'Untitled', 'Way Maker']);
+  same('a map already saved with an empty title opens too', djw.parseDjw('djw: 2\nsong:\n  title: ""\n  meter: 4/4\ngrid:\n  beats: [1, 1.5]\n  downbeats: [1]\nsections: []\n').title, 'Untitled');
+
+  // The start-to-finish round trip: every change a person makes on these screens comes back.
+  const finished = blank({
+    title: 'Whole Song',
+    artist: 'A Band',
+    duration: 60,
+    beatsPerBar: 3,
+    taps: Array.from({ length: 115 }, (_, i) => ({ t: 1 + i * 0.5, one: i % 3 === 1, ...(i > 40 ? { auto: true } : {}) })),
+    marksEnd: 60,
+    sections: [
+      { id: 'a', type: 'intro', at: 1.5, key: 'G', pickupBeats: 0, fadeInBeats: 1, fadeOutBeats: 1, repeats: 1, jumpAt: 'phrase' },
+      { id: 'b', type: 'custom', name: 'Spontaneous', at: 13.5, key: 'Em', pickupBeats: 1.5, fadeInBeats: 2, fadeOutBeats: 3, fadeOutEndBeats: 1, repeats: 4, jumpAt: 'bar' },
+    ],
+  });
+  const back = blank({ ...djw.parseDjw(djw.serializeDjw(finished, { includeAudioPath: false })), id: 'tp', sections: djw.parseDjw(djw.serializeDjw(finished, { includeAudioPath: false })).sections.map((item, i) => ({ id: String(i), ...item })), duration: 60, marksEnd: 60, fill: false, peaks: [], chroma: [] } as never);
+  const shape = (item: import('../src/types.ts').Song) => map.sectionViews(item).map(view => [view.name, view.s, view.e, view.key, view.section.pickupBeats, view.section.fadeInBeats, view.section.fadeOutBeats, view.section.fadeOutEndBeats ?? 0, view.section.repeats, view.section.jumpAt]);
+  same('sections, seams, repeats and jumps come back from a saved map', shape(back), shape(finished));
+  same('so do the bars, in 3/4, with the 1 off the first beat', [back.beatsPerBar, map.songGrid(back).downbeats.map(r3).slice(0, 3)], [3, map.songGrid(finished).downbeats.map(r3).slice(0, 3)]);
+
+  // Export's Fix opens the section with the problem.
+  const badPickup = blank({ taps: tapped, marksEnd: 60, sections: [{ id: 'first', type: 'verse', at: 1, pickupBeats: 8, fadeInBeats: 1, fadeOutBeats: 1, repeats: 1, jumpAt: 'phrase' }] });
+  same('a seam that does not fit names its section for Fix', map.checks(badPickup).find(check => check.id === 'seams')?.sectionId, 'first');
+  same('the grid check names what is on the screen', map.checks(blank({ taps: tapped })).find(check => check.id === 'grid')?.text, 'The beat grid stops at 0:06. Tap further or map the rest from the song.');
+}
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);

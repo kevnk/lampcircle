@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEv
 import { AudioLines, ListMusic, Play, Search, Square, Trash2 } from 'lucide-react';
 import type { Song } from '../types';
 import { go, useStore } from '../store';
-import { Button, Card, Label, LinkButton, Menu, MenuItem, MiniStrip, RestingBars } from '../ui';
+import { Button, Card, Label, LinkButton, Menu, MenuItem, MiniStrip, RestingBars, ask } from '../ui';
 import { PAD_ALBUM, helper, importPad, importSong, jobKind, mapForRecording, nameMatch, queueLink, splitTitle, type Job } from '../lib/library';
 import { parseDjw, type DjwMap } from '../lib/djw';
 import { KEY_NAMES } from '../lib/music';
@@ -143,10 +143,10 @@ export function Library() {
     return () => void onOpened.delete(listener);
   }, []);
 
-  const removeSong = (song: Song) => {
+  const removeSong = async (song: Song) => {
     const inSets = sets.filter(set => set.songIds.includes(song.id)).length;
     const note = inSets ? ` It also comes out of ${inSets === 1 ? 'its set' : `${inSets} sets`}.` : '';
-    if (confirm(`Remove ${song.title} from your library?${note}`)) void store.removeSong(song.id);
+    if (await ask(`Remove ${song.title} from your library?${note}`, 'Remove')) await store.removeSong(song.id);
   };
 
   // ponytail: no export in the Mac app yet. Its save_text takes a string, and a library is hundreds of MB.
@@ -441,7 +441,7 @@ function AddFromYouTube({ tab, onFile, onDropFiles }: { tab: 'songs' | 'pads'; o
           </Button>
         </form>
         {(error || helperDown) && (
-          <p className="mt-2 text-sm text-danger">{error ?? 'The download helper is not running. Start it with npm run dev. You can still add audio files.'}</p>
+          <p className="mt-2 text-sm text-danger">{error ?? `${isTauri() ? 'Downloads are not working right now.' : 'The download helper is not running. Start it with npm run dev.'} You can still add audio files.`}</p>
         )}
         {jobs.length > 0 && (
           <ul className="mt-3 space-y-2" aria-label="Downloads">
@@ -669,8 +669,8 @@ function PadTable() {
                   type="button"
                   className="rounded-full p-2 text-muted hover:bg-raised hover:text-danger"
                   aria-label={`Remove ${pad.title}`}
-                  onClick={() => {
-                    if (confirm(`Remove ${pad.title}?`)) void removePad(pad.id);
+                  onClick={async () => {
+                    if (await ask(`Remove ${pad.title}?`, 'Remove')) await removePad(pad.id);
                   }}
                 >
                   <Trash2 className="h-4 w-4" />

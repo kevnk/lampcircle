@@ -24,6 +24,44 @@ export function Button({ tone = 'outline', className = '', ...props }: ButtonHTM
   );
 }
 
+/**
+ * A question asked in the page. In the Mac and iPhone apps window.confirm gives back a promise, which counts as
+ * yes without asking, and window.prompt gives back nothing, so neither can stand in for this.
+ */
+function question(message: string, action: string, danger: boolean, value?: string): Promise<string | null> {
+  return new Promise(resolve => {
+    const shape = 'inline-flex items-center justify-center rounded-full px-5 py-2.5 font-medium transition';
+    const dialog = document.createElement('dialog');
+    // useKeys stands down while this is in the document.
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.className = 'w-96 max-w-[calc(100vw-2rem)] rounded-2xl border border-edge bg-panel p-5 text-ink shadow-2xl backdrop:bg-navy/60';
+    const form = Object.assign(document.createElement('form'), { method: 'dialog' });
+    const text = Object.assign(document.createElement('p'), { className: 'font-medium', textContent: message });
+    const input = value === undefined ? null : Object.assign(document.createElement('input'), { value, required: true, className: 'mt-3 w-full rounded-full border border-edge bg-well px-4 py-2' });
+    input?.setAttribute('aria-label', message);
+    const row = Object.assign(document.createElement('div'), { className: 'mt-5 flex justify-end gap-2' });
+    // Cancel comes first, so it has the focus on a yes-or-no question, and Enter on a typed answer goes to the action.
+    const cancel = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Cancel', className: `${shape} ${TONES.outline}`, onclick: () => dialog.close() });
+    const yes = Object.assign(document.createElement('button'), { type: 'submit', value: 'yes', textContent: action, className: `${shape} ${danger ? 'bg-danger font-semibold text-panel hover:bg-danger/85' : TONES.primary}` });
+    row.append(cancel, yes);
+    form.append(text, ...(input ? [input] : []), row);
+    dialog.append(form);
+    dialog.addEventListener('close', () => {
+      dialog.remove();
+      resolve(dialog.returnValue === 'yes' ? (input?.value.trim() ?? '') : null);
+    });
+    document.body.append(dialog);
+    dialog.showModal();
+    input?.select();
+  });
+}
+
+/** True when they choose `action`. Await it: the answer is a promise. */
+export const ask = (message: string, action: string): Promise<boolean> => question(message, action, true).then(answer => answer !== null);
+
+/** What they typed, or null when they cancel. */
+export const askText = (message: string, value: string, action: string): Promise<string | null> => question(message, action, false, value).then(answer => answer || null);
+
 export function LinkButton({ className = '', ...props }: ButtonHTMLAttributes<HTMLButtonElement>) {
   return <button type="button" className={`font-medium text-amber underline decoration-amber/40 underline-offset-4 hover:decoration-amber ${className}`} {...props} />;
 }
