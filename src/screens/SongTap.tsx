@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, MousePointer2, Pause, Play, Scissors, Undo2, X } from 'lucide-react';
 import type { Section, SectionType, Song, Tap } from '../types';
 import { go, useStore } from '../store';
@@ -8,6 +8,8 @@ import { isIOS } from '../platform';
 import { KEY_NAMES, detectKey, keyName } from '../lib/music';
 import { sectionChroma, snapToOnset, type Onsets } from '../lib/analysis';
 import { onsetsOf } from '../lib/library';
+import { LyricsLane, type LyricsEdit } from './LyricsLane';
+import { LyricsPanel } from './LyricsPanel';
 import {
   MIN_TAPS,
   SECTION_TYPES,
@@ -109,6 +111,15 @@ export function SongTap({ song }: { song: Song }) {
     const previous = history.current.pop();
     if (previous) save(previous, false);
   };
+  /** Lyrics edits on the Mac. The phone shows lyrics read-only, like Transitions. */
+  const edit: LyricsEdit | null = ios
+    ? null
+    : (change, undoable = true) => {
+        const before = latest.current;
+        const next = change(before);
+        save(next, undoable);
+        return next !== before;
+      };
   const pos = loaded ? transport.position() : 0;
   const grid = songGrid(song);
   const views = sectionViews(song);
@@ -306,13 +317,17 @@ export function SongTap({ song }: { song: Song }) {
             selectedId={selected?.section.id ?? null}
             onSelect={setSelectedId}
             onCut={t => save(cutSection(latest.current, t))}
-          />
+          >
+            <LyricsLane song={song} edit={edit} onSeek={t => transport.seek(t)} onPick={() => setSelectedId(null)} />
+          </Track>
           {selected && <SectionInspector song={song} view={selected} save={save} loaded={loaded} onRetap={() => retapSection(selected)} onClose={() => setSelectedId(null)} />}
         </div>
         <p className="mt-3 text-right text-xs text-muted ios:hidden">
           V select · C cut · ← → bar · ↑ ↓ section · 0 or Home start of song · Enter play or pause · Backspace undo
         </p>
       </Card>
+
+      <LyricsPanel song={song} edit={edit} />
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,354px)_minmax(0,1fr)]">
         <Card className="self-start p-5">
@@ -650,6 +665,7 @@ function Track({
   selectedId,
   onSelect,
   onCut,
+  children,
 }: {
   song: Song;
   views: SectionView[];
@@ -660,6 +676,8 @@ function Track({
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onCut: (t: number) => void;
+  /** The lyrics lane, under the sections. */
+  children?: ReactNode;
 }) {
   const grid = songGrid(song);
   const duration = song.duration || 1;
@@ -792,6 +810,7 @@ function Track({
             </div>
           )}
         </div>
+        {children}
         {cut && (
           <div
             className="pointer-events-none absolute -top-1 bottom-0 border-l-2 border-dashed border-accent"

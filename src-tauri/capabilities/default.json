@@ -4,7 +4,8 @@
   "description": "What the Lampcircle windows may call",
   "windows": [
     "main",
-    "settings"
+    "settings",
+    "lyrics"
   ],
   "permissions": [
     "core:default",

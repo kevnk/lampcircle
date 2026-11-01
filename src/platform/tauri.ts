@@ -1,6 +1,8 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { emitTo, listen } from '@tauri-apps/api/event';
+import type { DisplayCue } from '../lib/lyricsCue';
 import type { CaptionTrack } from '../lib/lyricsFetch';
+import type { MonitorInfo } from '../lib/lyricsWindow';
 import { normalizeSettings, type Desktop, type DiagnosticsExport, type Job, type LastSession, type Mobile, type Platform, type UpdateCheck, type UpdateProgress } from './types';
 
 function onEvent<T>(name: string, handler: (payload: T) => void): () => void {
@@ -49,6 +51,18 @@ export const desktop: Desktop = {
   exportDiagnostics: () => invoke<DiagnosticsExport | null>('export_diagnostics'),
   takeOpenedFiles: () => invoke<Array<{ name: string; text: string }>>('take_opened_files'),
   onFilesOpened: handler => onEvent<null>('files-opened', handler),
+  listMonitors: () => invoke<MonitorInfo[]>('list_monitors'),
+  openLyricsDisplay: monitor => invoke<string>('open_lyrics_display', { monitor }),
+  closeLyricsDisplay: () => invoke<void>('close_lyrics_display'),
+  lyricsDisplayMonitor: () => invoke<string | null>('lyrics_display_monitor'),
+  onLyricsDisplayClosed: handler => onEvent<null>('lyrics-display-closed', handler),
+  onLyricsDisplayReady: handler => onEvent<null>('lyrics-display-ready', handler),
+  sendLyricsCues: cues => void emitTo('lyrics', 'lyrics-cues', cues).catch(() => {}),
+  joinLyricsCues(handler) {
+    const unlisten = listen<DisplayCue[]>('lyrics-cues', event => handler(event.payload));
+    void unlisten.then(() => emitTo('main', 'lyrics-display-ready')).catch(() => {});
+    return () => void unlisten.then(stop => stop());
+  },
 };
 
 /** The Files picker also offers these, which the Mac library never holds. */

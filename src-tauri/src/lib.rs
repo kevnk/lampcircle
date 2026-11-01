@@ -1,3 +1,5 @@
+#[cfg(target_os = "ios")]
+mod airplay;
 mod analytics;
 mod captions;
 mod diagnostics;
@@ -6,6 +8,8 @@ mod error;
 mod feedback;
 mod ios;
 mod login_item;
+#[cfg(desktop)]
+mod lyrics_window;
 mod session;
 mod storage;
 mod updater;
@@ -318,6 +322,8 @@ pub fn run() {
             app.manage::<downloads::Shared>(std::sync::Arc::new(downloads::Downloads::new(library)?));
             #[cfg(target_os = "ios")]
             ios::setup(app);
+            #[cfg(target_os = "ios")]
+            airplay::setup(app);
             #[cfg(desktop)]
             build_menu(app.handle())?;
             log::info!(target: diagnostics::SUPPORT_LOG_TARGET, "application_ready");
@@ -346,6 +352,7 @@ pub fn run() {
                 let _ = window.hide();
             }
         }
+        lyrics_window::on_window_event(window, event);
     });
 
     builder
@@ -358,6 +365,22 @@ pub fn run() {
             relaunch,
             take_opened_files,
             open_settings,
+            #[cfg(desktop)]
+            lyrics_window::list_monitors,
+            #[cfg(desktop)]
+            lyrics_window::lyrics_display_monitor,
+            #[cfg(desktop)]
+            lyrics_window::open_lyrics_display,
+            #[cfg(desktop)]
+            lyrics_window::close_lyrics_display,
+            #[cfg(target_os = "ios")]
+            airplay::list_monitors,
+            #[cfg(target_os = "ios")]
+            airplay::lyrics_display_monitor,
+            #[cfg(target_os = "ios")]
+            airplay::open_lyrics_display,
+            #[cfg(target_os = "ios")]
+            airplay::close_lyrics_display,
             login_item::set_open_at_login,
             login_item::get_open_at_login,
             session::get_last_session,
@@ -381,6 +404,16 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| match event {
             tauri::RunEvent::Ready => analytics::track_app_opened(app),
+            #[cfg(target_os = "ios")]
+            tauri::RunEvent::SceneRequested { scene, .. } => airplay::scene_requested(app, &scene),
+            #[cfg(target_os = "ios")]
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::Destroyed,
+                ..
+            } if label == "lyrics" => {
+                let _ = app.emit_to("main", "lyrics-display-closed", ());
+            }
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => focus_main_window(app),
             #[cfg(target_os = "macos")]

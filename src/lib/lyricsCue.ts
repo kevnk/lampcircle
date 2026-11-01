@@ -55,9 +55,7 @@ export function lyricsCue(snapshot: Snapshot, ps: Pick<PerfSong, 'song' | 'grid'
   const lyrics = ps.song.lyrics;
   /** Audio time `beats` before `t`. */
   const before = (t: number, beats: number) => beatTime(grid, beatPos(grid, t) - beats);
-  /** Beats before its bar a slide comes in. Only a section's first slide has singers coming in early. */
-  const leadOf = (section: SectionView, bar: number, lines: string[]) =>
-    !lines.length ? 0 : bar === section.s ? Math.max(lead, section.section.pickupBeats + 0.5) : lead;
+  const leadOf = (section: SectionView, bar: number, lines: string[]) => slideLead(section, bar, lines, lead);
 
   const target = playing.next ? views[playing.next.idx] : undefined;
   const landing = target ? pos + (playing.next!.landingCtx - ctxNow) : Infinity;
@@ -84,6 +82,11 @@ export function lyricsCue(snapshot: Snapshot, ps: Pick<PerfSong, 'song' | 'grid'
     fadeSeconds: beatTime(grid, beatPos(grid, at) + fade) - at,
     idle: !views.some(item => slidesOf(item, lyrics).some(slide => slide.lines.length)),
   };
+}
+
+/** Beats before its bar (absolute) a slide comes in. A blank comes in on its bar, and only a section's first slide has singers coming in early. */
+export function slideLead(view: SectionView, bar: number, lines: string[], lead: number): number {
+  return !lines.length ? 0 : bar === view.s ? Math.max(lead, view.section.pickupBeats + 0.5) : lead;
 }
 
 /** A section's slides on absolute bars. Before its first slide, and with no words at all, it is blank. */
@@ -124,7 +127,7 @@ export const CUE_START: CueState = { seq: 0, up: null, pending: null, tapped: nu
 export interface CueInput {
   /** The context time the cue was worked out for. */
   ctxNow: number;
-  /** The display clock now, such as `performance.timeOrigin + performance.now()`. */
+  /** The display clock now. `Date.now()` on the Mac, where two windows share it; each window's `performance.now()` can stop during sleep. */
   ms: number;
   /** Blank and Logo hold the screen until it goes back to words. Missing means words. */
   mode?: 'words' | 'blank' | 'logo';
@@ -155,7 +158,7 @@ export function nextCue(state: CueState, cue: LyricsCue, input: CueInput): { sta
   const show = (lines: string[]): Face => (lines.length ? { text: lines.join('\n'), logo: false } : cue.idle ? idle : BLACK);
   const auto = cue.now ? show(cue.now) : (up ?? show([]));
   if (input.tap) tapped = { face: { text: input.tap.join('\n'), logo: false }, over: cue.since };
-  else if (tapped && (tapped.over === null || cue.since === null ? tapped.over !== cue.since : Math.abs(tapped.over - cue.since) > 1e-3)) tapped = null;
+  else if (tapped && (tapped.over === null || cue.since === null ? tapped.over !== cue.since : Math.abs(tapped.over - cue.since) > SLACK_MS / 1000)) tapped = null;
   const want = mode === 'blank' ? BLACK : mode === 'logo' ? LOGO : (tapped?.face ?? auto);
   const next = mode === 'words' && cue.next && cue.changeAt !== null ? show(cue.next) : null;
   const coming = next && !same(next, want) ? { ...next, changeAtMs: ms + (cue.changeAt! - ctxNow) * 1000 } : null;

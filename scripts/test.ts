@@ -975,6 +975,633 @@ same('with a 4-beat lead, a late pick puts the Chorus up at once, and cancelling
   ['Verse c', 11.1, 500],
 ]);
 
+// Finessing lyrics on Map Song: the lane's boxes and the slide edits. 120 BPM in 4/4, so bar n starts at 2n s. Intro
+// bars 0-2, Verse 1 2-6, Chorus 1 6-12, Verse 2 12-16, Chorus 2 16-20 with no pickup. The choruses share a block, and
+// so do the verses. Words are made up.
+const lyricsEdit = await import('../src/lib/lyricsEdit.ts');
+const editBase = barSong([['intro', 0, 0], ['verse', 2], ['chorus', 6], ['verse', 12], ['chorus', 16, 0]], 20);
+const editSong = {
+  ...editBase,
+  lyrics: { source: 'manual', blocks: { verse: [['Alpha one', 'alpha two'], ['Beta one']], chorus: [['Gamma one', 'gamma two', 'gamma three'], [], ['Delta one']] } },
+  sections: editBase.sections.map(x => (x.type === 'intro' ? x : { ...x, lyric: { block: x.type, slideBars: x.type === 'verse' ? [0, 2] : [0, 2, 3] } })),
+} as PlacedSong;
+/** Each section's slide bars, and the blocks. */
+const shape = (song: PlacedSong) => [Object.fromEntries(song.sections.filter(x => x.lyric).map(x => [x.id, x.lyric!.slideBars])), song.lyrics?.blocks];
+const lane = (song: PlacedSong) =>
+  lyricsEdit.laneSlides(song).map(x => [x.sectionId, x.i, x.start, x.end, x.changeAt, x.lines[0] ?? '-', x.shared, x.last, x.check]);
+same('the lane: a box per slide from its bar to the next, the change 2 beats ahead, a blank on its bar', lane(editSong).slice(0, 5), [
+  ['s1', 0, 4, 8, 3, 'Alpha one', true, false, false],
+  ['s1', 1, 8, 12, 7, 'Beta one', true, true, false],
+  ['s2', 0, 12, 16, 11, 'Gamma one', true, false, false],
+  ['s2', 1, 16, 18, 16, '-', true, false, false],
+  ['s2', 2, 18, 24, 17, 'Delta one', true, true, false],
+]);
+const autoSong = { ...editSong, lyrics: { ...editSong.lyrics!, source: 'youtube-auto' }, timedLyrics: [line(4, 6, 'alpha one alpha two', 'auto'), line(8, 9, 'Beta one', 'auto')] };
+const checked = (song: PlacedSong) => lyricsEdit.laneSlides(song).filter(x => x.check).map(x => `${x.sectionId}:${x.i}`);
+same('check words: auto caption words nobody changed, every worded slide when the captions are gone, none for other sources', [
+  checked(autoSong),
+  checked(lyricsEdit.setSlideText(autoSong, 's1', 0, 'Alpha won\nalpha two')),
+  checked({ ...autoSong, timedLyrics: undefined }).length,
+  checked(editSong),
+], [['s1:0', 's1:1', 's3:0', 's3:1'], ['s1:1', 's3:1'], 8, []]);
+
+same('dragging an edge snaps to the nearest bar, stays inside its section and between its neighbours; the first slide stays put', [
+  shape(lyricsEdit.moveSlideEdge(editSong, 's1', 1, 6.9))[0].s1,
+  shape(lyricsEdit.moveSlideEdge(editSong, 's1', 1, 30))[0].s1,
+  shape(lyricsEdit.moveSlideEdge(editSong, 's2', 1, 12))[0],
+  lyricsEdit.moveSlideEdge(editSong, 's2', 2, 12) === editSong,
+  lyricsEdit.moveSlideEdge(editSong, 's1', 0, 8) === editSong,
+], [[0, 1], [0, 3], { s1: [0, 2], s2: [0, 1, 3], s3: [0, 2], s4: [0, 2, 3] }, true, true]);
+same('split: halves its lines, and every section on the block gets the new slide halfway to its next one', shape(lyricsEdit.splitSlide(editSong, 's2', 0)), [
+  { s1: [0, 2], s2: [0, 1, 2, 3], s3: [0, 2], s4: [0, 1, 2, 3] },
+  { verse: editSong.lyrics!.blocks.verse, chorus: [['Gamma one', 'gamma two'], ['gamma three'], [], ['Delta one']] },
+]);
+same('split at the cursor, mid-line; refused for a blank, a single word, or when a section on the block has no bar for it', [
+  lyricsEdit.splitText('Gamma one\ngamma two\ngamma three', 14),
+  lyricsEdit.splitSlide(editSong, 's2', 1) === editSong,
+  ((oneWord: PlacedSong) => lyricsEdit.splitSlide(oneWord, 's1', 1) === oneWord)(lyricsEdit.setSlideText(editSong, 's1', 1, 'Beta')),
+  lyricsEdit.splitSlide(editSong, 's2', 2, [['Delta'], ['one']]) === editSong,
+  shape(lyricsEdit.splitSlide(editSong, 's1', 1))[1]!.verse,
+], [[['Gamma one', 'gamm'], ['a two', 'gamma three']], true, true, true, [['Alpha one', 'alpha two'], ['Beta'], ['one']]]);
+same('merge with next joins the words (a blank adds none) in every section on the block; the last slide has no next', [
+  shape(lyricsEdit.mergeNext(editSong, 's2', 1)),
+  lyricsEdit.mergeNext(editSong, 's2', 2) === editSong,
+], [[{ s1: [0, 2], s2: [0, 2], s3: [0, 2], s4: [0, 2] }, { verse: editSong.lyrics!.blocks.verse, chorus: [['Gamma one', 'gamma two', 'gamma three'], ['Delta one']] }], true]);
+same('make blank and new words change the block; a lone "-" is a blank; no change gives the same song', [
+  shape(lyricsEdit.makeBlank(editSong, 's1', 1))[1]!.verse,
+  shape(lyricsEdit.setSlideText(editSong, 's4', 2, '  Delta won \n\n delta two '))[1]!.chorus[2],
+  shape(lyricsEdit.setSlideText(editSong, 's2', 0, '-'))[1]!.chorus[0],
+  lyricsEdit.makeBlank(editSong, 's2', 1) === editSong,
+  lyricsEdit.setSlideText(editSong, 's1', 1, 'Beta one') === editSong,
+], [[['Alpha one', 'alpha two'], []], ['Delta won', 'delta two'], [], true, true]);
+const spread = lyricsEdit.moveSlideEdge(editSong, 's2', 2, at(11));
+same('use these bar positions for every section on the block: a shorter section leaves out bars past its end', [
+  shape(lyricsEdit.applyBarsToBlock(spread, 's2'))[0],
+  lyricsEdit.applyBarsToBlock(lyricsEdit.applyBarsToBlock(spread, 's2'), 's2') === lyricsEdit.applyBarsToBlock(spread, 's2'),
+  shape(lyricsEdit.applyBarsToBlock(spread, 's4'))[0].s2,
+], [{ s1: [0, 2], s2: [0, 2, 5], s3: [0, 2], s4: [0, 2] }, false, [0, 2, 3]]);
+// Chorus 2 cut short after its slides were placed, so its third slide is past its end.
+const cutShort = { ...editSong, sections: editSong.sections.map(x => (x.id === 's4' ? { ...x, lyric: { block: 'chorus', slideBars: [0, 2, 5] } } : x)) };
+same("a split where a section's slide is past its end drops its bars there, so none points at the wrong words later", shape(lyricsEdit.splitSlide(cutShort, 's2', 2))[0], {
+  s1: [0, 2], s2: [0, 2, 3, 4], s3: [0, 2], s4: [0, 2],
+});
+const editedSong = [
+  (x: PlacedSong) => lyricsEdit.splitSlide(x, 's2', 0),
+  (x: PlacedSong) => lyricsEdit.mergeNext(x, 's2', 2),
+  (x: PlacedSong) => lyricsEdit.makeBlank(x, 's1', 1),
+  (x: PlacedSong) => lyricsEdit.setSlideText(x, 's3', 0, 'Alpha one\nalpha two\n-'),
+  (x: PlacedSong) => lyricsEdit.moveSlideEdge(x, 's2', 2, at(10)),
+  (x: PlacedSong) => lyricsEdit.applyBarsToBlock(x, 's2'),
+].reduce((song, op) => op(song), editSong);
+const editedWarnings: string[] = [];
+const editedBack = opened(djw.parseDjw(djw.serializeDjw(editedSong, { includeAudioPath: false }), editedWarnings), editedSong.duration);
+// Opening a .djw gives sections new ids, so they are compared in order.
+same('edited lyrics survive a .djw export and import, with no warnings', [editedBack.sections.map(x => x.lyric ?? null), editedBack.lyrics, editedWarnings], [
+  [null, { block: 'verse', slideBars: [0, 2] }, { block: 'chorus', slideBars: [0, 1, 4] }, { block: 'verse', slideBars: [0, 2] }, { block: 'chorus', slideBars: [0, 1] }],
+  { source: 'manual', blocks: { verse: [['Alpha one', 'alpha two', '-'], []], chorus: [['Gamma one', 'gamma two'], ['gamma three'], ['Delta one']] } },
+  [],
+]);
+
+const editPs = psOf(editSong);
+const previewAt = (pos: number, paused = false) => {
+  const cue = cueLib.lyricsCue(lyricsEdit.previewSnapshot(editPs.views, pos, pos + 100, paused), editPs, pos + 100);
+  return [cue.now, cue.next, cue.changeAt === null ? null : r3(cue.changeAt - 100)];
+};
+same('the preview plays the song straight through: the intro blank, a slide 2 beats ahead, the next section, paused, then idle past the end', [
+  previewAt(1),
+  previewAt(7.5),
+  previewAt(7.5, true),
+  lyricsEdit.previewSnapshot(editPs.views, 40.5, 140.5, false).song,
+], [[[], ['Alpha one', 'alpha two'], 3], [['Beta one'], ['Gamma one', 'gamma two', 'gamma three'], 11], [['Beta one'], null, null], null]);
+
+const timedSong = {
+  ...barSong([['verse', 0], ['chorus', 4]], 12, 8),
+  lyrics: { source: 'lrclib:1', leadBeats: 3, blocks: {} },
+  timedLyrics: [line(0.1, 1.9, 'One a'), line(2.1, 3.9, 'One b'), line(4.1, 5.9, 'One c'), line(8.1, 9.9, 'Two a'), line(18, 19, 'Tail words')],
+} as PlacedSong;
+const againOne = lyricsEdit.placeAgain(timedSong, { linesPerSlide: 1 })!.song;
+const nudgedAgain = lyricsEdit.placeAgain(againOne, { offset: 0.5 })!.song;
+same('place again: lines per slide and the nudge place the found lines again, keep how, and leave the lead alone; unplaced lines are found', [
+  againOne.lyrics?.blocks,
+  againOne.lyricsPlacing,
+  [nudgedAgain.lyrics?.offset, nudgedAgain.lyrics?.leadBeats, nudgedAgain.lyricsPlacing],
+  lyricsEdit.placementOf(againOne)?.unplaced.map(x => x.text),
+  lyricsEdit.placeAgain(editSong),
+], [
+  { verse: [['One a'], ['One b'], ['One c']], chorus: [['Two a']] },
+  { linesPerSlide: 1, autoOffset: false },
+  [0.5, 3, { linesPerSlide: 1, autoOffset: false }],
+  ['Tail words'],
+  null,
+]);
+
+// The Words strip on Perform: the beats to the change, Blank and Logo, tapped slides, and the app-wide lead and fade.
+// On `cuePs`, Verse b comes in at 11 s, then a blank at 16 s. Words are made up.
+const wordsLib = await import('../src/lib/lyricsDisplay.ts');
+type WordsState = import('../src/lib/lyricsDisplay.ts').WordsState;
+const beatsAt = (snapshot: CueSnap) => {
+  const ctxNow = snapshot.song!.pos + 100;
+  return wordsLib.beatsToChange(cueLib.lyricsCue(snapshot, cuePs, ctxNow), cuePs.grid, snapshot.song!.pos, ctxNow);
+};
+const someCue = cueLib.lyricsCue(inVerse(10), cuePs, 110);
+same('the countdown: whole beats to the change, 1 through the last beat, counted on the real grid, and none while paused or after the last slide', [
+  [10, 10.25, 10.5, 10.99, 11.1].map(pos => beatsAt(inVerse(pos))),
+  wordsLib.beatsToChange({ ...someCue, changeAt: 102 }, { beats: [0, 0.5, 1, 2, 3] } as never, 0.5, 100),
+  beatsAt(snapAt(1, 10, [2, 24], {}, true)),
+  wordsLib.beatsToChange({ ...someCue, changeAt: null }, cuePs.grid, 10, 110),
+], [[2, 2, 1, 1, 10], 3, null, null]);
+
+const faceText = (state: WordsState) => (state.faces.up?.logo ? 'logo' : state.faces.up?.text || '-');
+const blank = (state: WordsState) => wordsLib.toggleScreen(state, 'blank');
+const logo = (state: WordsState) => wordsLib.toggleScreen(state, 'logo');
+const tapped = (...lines: string[]) => (state: WordsState) => wordsLib.tapSlide(state, lines);
+/** One tick per [pos, press], gives what is on the screen after each. `wobble` is seconds between the snapshot's clock and `ctxNow`, on every other tick. */
+const screenAfter = (steps: Array<[number, ((state: WordsState) => WordsState)?]>, wobble = 0) => {
+  let state = wordsLib.WORDS_START;
+  return steps.map(([pos, press], k) => {
+    if (press) state = press(state);
+    const ctxNow = pos + 100 + (k % 2) * wobble;
+    state = wordsLib.tickWords(state, cueLib.lyricsCue(inVerse(pos), cuePs, ctxNow), { ctxNow, ms: ctxNow * 1000 }).state;
+    return faceText(state);
+  });
+};
+same('Blank and Logo hold the screen and a second press goes back; one to the other just swaps', screenAfter([[10], [10.1, blank], [10.2], [10.3, blank], [10.4, logo], [10.5, blank], [10.6, logo], [10.7, logo]]), [
+  'Verse a', '-', '-', 'Verse a', 'logo', '-', 'logo', 'Verse a',
+]);
+same('going back from Blank shows the slide the song is on by then, not the one it covered', screenAfter([[10], [10.5, blank], [11.2], [11.3, blank]]), ['Verse a', '-', '-', 'Verse b']);
+same('a tap shows that slide now, it stays through the change it came early for, and the next change takes over', screenAfter([[10], [10.1, tapped('Verse b')], [10.5], [11.1], [12], [16.1]]), [
+  'Verse a', 'Verse b', 'Verse b', 'Verse b', 'Verse b', '-',
+]);
+same('a tap on a slide comes out of Blank and Logo, and a tap on a blank slide blacks the screen', [
+  screenAfter([[10], [10.1, blank], [10.2, tapped('Verse a')], [10.3, logo], [10.4, tapped('Verse b')]]),
+  screenAfter([[10], [10.1, tapped()]]),
+], [['Verse a', '-', 'Verse a', 'logo', 'Verse b'], ['Verse a', '-']]);
+same('Blank and back goes to the slide the song is on, past an earlier tap', screenAfter([[10], [10.1, tapped('Chorus a')], [10.2, blank], [10.3, blank]]), ['Verse a', 'Chorus a', '-', 'Verse a']);
+same('a tap holds when the clock read beside the snapshot wobbles by 3 ms, as two reads of the audio clock can', screenAfter([[10], [10.1, tapped('Chorus a')], [10.2], [10.3]], 0.003), ['Verse a', 'Chorus a', 'Chorus a', 'Chorus a']);
+
+/** Ticks at [pos, ms past the pos's own time, paused], gives the last state and the cues sent. */
+const fadeRun = (ticks: Array<[number, number?, boolean?]>) => {
+  let state = wordsLib.WORDS_START;
+  const sent: string[] = [];
+  for (const [pos, after = 0, paused = false] of ticks) {
+    const ctxNow = pos + 100;
+    const step = wordsLib.tickWords(state, cueLib.lyricsCue(snapAt(1, pos, [2, 24], {}, paused), cuePs, ctxNow), { ctxNow, ms: ctxNow * 1000 + after });
+    state = step.state;
+    sent.push(...step.cues.map(cue => cue.text || '-'));
+  }
+  return [faceText(state), state.faces.was?.text ?? null, r3(state.faces.p), sent];
+};
+same('the screen follows the real fade: halfway through the beat-long change it holds both slides', fadeRun([[10.9], [11.25]]), ['Verse b', 'Verse a', 0.5, ['Verse a', 'Verse b', '-']]);
+same('pause freezes: a fade under way finishes, a change still to come is called off and never lands', [
+  fadeRun([[10.9], [11.1, 0, true], [11.1, 1000, true]]),
+  fadeRun([[10.9], [10.9, 0, true], [10.9, 5000, true]]),
+  fadeRun([[10.9], [11.1], [11.2, 0, true]]),
+], [
+  ['Verse b', 'Verse a', 1, ['Verse a', 'Verse b']],
+  ['Verse a', null, 1, ['Verse a', 'Verse b', 'Verse a']],
+  ['Verse b', 'Verse a', 0.4, ['Verse a', 'Verse b', '-', 'Verse b']],
+]);
+
+const faceCue = (seq: number, text: string, at: number) => ({ seq, text, logo: false, changeAtMs: at, fadeMs: 500 });
+const cutIn = (p: number, ms: number) => {
+  const faces = wordsLib.facesAt({ up: faceCue(2, 'B', 1000), was: faceCue(1, 'A', 0), p, from: 1 }, { seq: 3, up: faceCue(3, 'C', ms), pending: null }, ms);
+  return [faces.up?.text, faces.was?.text, faces.from, faces.p];
+};
+same('a new slide cutting into a fade leaves from whichever face is stronger, at the strength it had', [cutIn(0.2, 1100), cutIn(0.7, 1350)], [['C', 'A', 0.8, 0], ['C', 'B', 0.7, 0]]);
+
+const offerAt = (press?: (state: WordsState) => WordsState, snapshot = inVerse(10)) => {
+  let state = wordsLib.tickWords(wordsLib.WORDS_START, cueLib.lyricsCue(inVerse(10), cuePs, 110), { ctxNow: 110, ms: 110000 }).state;
+  if (press) state = wordsLib.tickWords(press(state), cueLib.lyricsCue(inVerse(10), cuePs, 110), { ctxNow: 110, ms: 110000 }).state;
+  return wordsLib.slidesToOffer(state, cueLib.lyricsCue(snapshot, cuePs, snapshot.song!.pos + 100));
+};
+same('beside the screen: the next slide; the current one too once Blank, Logo or a tap covers it; nothing that would change nothing; none while paused', [
+  offerAt(),
+  offerAt(blank),
+  offerAt(logo),
+  offerAt(tapped('Verse b')),
+  offerAt(blank, inVerse(11.5)),
+  offerAt(undefined, snapAt(1, 10, [2, 24], {}, true)),
+], [
+  { current: null, next: ['Verse b'] },
+  { current: ['Verse a'], next: ['Verse b'] },
+  { current: ['Verse a'], next: ['Verse b'] },
+  { current: ['Verse a'], next: null },
+  { current: ['Verse b'], next: null },
+  { current: null, next: null },
+]);
+
+/** Through the engine, as in the cue tests above: each step runs at its context time, and the screen's cues come back as [words, at, fade ms]. */
+function holderCues(steps: Array<[number, (state: WordsState) => WordsState]>, until: number) {
+  clockNow = 0;
+  const session = new engine.PerformSession(async () => null);
+  session.startSong({ ...cuePs, buffer: { duration: cuePs.song.duration } } as never, { from: 1 });
+  let state = wordsLib.WORDS_START;
+  const out: Array<[string, number, number]> = [];
+  for (let k = 0, i = 0; k <= until * 100; k++) {
+    clockNow = k / 100;
+    while (i < steps.length && clockNow >= steps[i][0]) state = steps[i++][1](state);
+    session.tick();
+    const step = wordsLib.tickWords(state, cueLib.lyricsCue(session.snapshot(), session.ps, clockNow), { ctxNow: clockNow, ms: clockNow * 1000 });
+    state = step.state;
+    out.push(...step.cues.map(cue => [cue.text || (cue.logo ? 'logo' : '-'), r3(cue.changeAtMs / 1000), cue.fadeMs] as [string, number, number]));
+  }
+  return out;
+}
+same('through the engine: Blank clears the change to come, the song plays on under it, and back goes to the slide it reached', holderCues([[2, blank], [6, blank]], 10), [
+  ['-', 0, 250],
+  ['Verse a', 0.1, 500],
+  ['Verse b', 4.1, 500],
+  ['-', 2, 250],
+  ['Verse b', 6, 250],
+  ['-', 9.1, 500],
+  ['Verse c', 12.1, 500],
+]);
+
+const prefsFor = (lyrics: Partial<import('../src/types.ts').Lyrics>, prefs: import('../src/lib/lyricsCue.ts').LyricsPrefs) => cueOf(inVerse(10), psOf(withWords(cueBase, lyrics)), prefs).slice(2);
+same('lead and fade: the app default for a song with none, the song value wins, field by field', [
+  prefsFor({}, { leadBeats: 3, fadeBeats: 0 }),
+  prefsFor({ leadBeats: 1 }, { leadBeats: 3, fadeBeats: 2 }),
+  prefsFor({ fadeBeats: 0 }, { leadBeats: 3, fadeBeats: 2 }),
+  lyricsEdit.laneSlides(editSong, { leadBeats: 3, fadeBeats: 1 })[0].changeAt,
+], [[10.5, 0], [11.5, 1], [10.5, 0], 2.5]);
+same('the saved default: kept when good, held to its range on half beats, back to the start when broken', [
+  wordsLib.parseLyricsPrefs(null),
+  wordsLib.parseLyricsPrefs('{"leadBeats":2.5,"fadeBeats":0}'),
+  wordsLib.parseLyricsPrefs('{"leadBeats":9,"fadeBeats":-1}'),
+  wordsLib.parseLyricsPrefs('{"leadBeats":1.3}'),
+  wordsLib.parseLyricsPrefs('{"leadBeats":"x","fadeBeats":null}'),
+  wordsLib.parseLyricsPrefs('null'),
+  wordsLib.parseLyricsPrefs('not json'),
+], [
+  { leadBeats: 2, fadeBeats: 1 },
+  { leadBeats: 2.5, fadeBeats: 0 },
+  { leadBeats: 3, fadeBeats: 0 },
+  { leadBeats: 1.5, fadeBeats: 1 },
+  { leadBeats: 2, fadeBeats: 1 },
+  { leadBeats: 2, fadeBeats: 1 },
+  { leadBeats: 2, fadeBeats: 1 },
+]);
+same('a song with no lead or fade writes none to its .djw, and only slides with words count as words', [
+  ['lead_beats', 'fade_beats'].map(field => djw.serializeDjw(withWords(cueBase), { includeAudioPath: false }).includes(field)),
+  [cueBase, withWords(cueBase), { ...withWords(cueBase), lyrics: { blocks: { verse: [[]] } } }].map(song => wordsLib.hasWords(song)),
+], [[false, false], [false, true, false]]);
+
+// The Mac lyrics window: cues from a real PerformSession on the test clock, sent the way Perform sends them, into a
+// display built the way the window builds it.
+const windowLib = await import('../src/lib/lyricsWindow.ts');
+type Shown = Array<[string, number]>;
+type WindowDisplay = import('../src/lib/lyricsCue.ts').DisplayState;
+const blankDisplay = (): WindowDisplay => ({ seq: 0, up: null, pending: null });
+const faceName = (cue: import('../src/lib/lyricsCue.ts').DisplayCue | null) => (cue ? cue.text || (cue.logo ? 'logo' : '-') : null);
+
+/** What a window shows and when: `joinAt` is when it opens and catches up, `until` is in seconds. */
+function windowRun({ delay = 0, joinAt = 0, until, steps = [] }: { delay?: number; joinAt?: number; until: number; steps?: Array<[number, (state: WordsState) => WordsState]> }) {
+  clockNow = 0;
+  const session = new engine.PerformSession(async () => null);
+  session.startSong({ ...cuePs, buffer: { duration: cuePs.song.duration } } as never, { from: 1 });
+  let state = windowLib.wordsStartAt(5000);
+  let shownDisplay: WindowDisplay | null = null;
+  let faces = wordsLib.WORDS_START.faces;
+  const shown: Shown = [];
+  const strip: Shown = [];
+  let stripFace: string | null = null;
+  for (let k = 0, i = 0; k <= until * 100; k++) {
+    clockNow = k / 100;
+    const ms = clockNow * 1000;
+    while (i < steps.length && clockNow >= steps[i][0]) state = steps[i++][1](state);
+    session.tick();
+    const step = wordsLib.tickWords(state, cueLib.lyricsCue(session.snapshot(), session.ps, clockNow), { ctxNow: clockNow, ms });
+    state = step.state;
+    const take = (cues: import('../src/lib/lyricsCue.ts').DisplayCue[]) => {
+      shownDisplay = cues.map(cue => windowLib.scheduleCue(cue, delay, ms)).reduce((held, cue) => cueLib.takeCue(held, cue, ms), shownDisplay!);
+    };
+    if (!shownDisplay && clockNow >= joinAt) {
+      shownDisplay = blankDisplay();
+      take(windowLib.catchUpCues(state.display));
+    } else if (shownDisplay) take(step.cues);
+    if (shownDisplay) {
+      const before = faceName(faces.up);
+      faces = wordsLib.facesAt(faces, shownDisplay, ms);
+      if (faceName(faces.up) !== before) shown.push([faceName(faces.up)!, clockNow]);
+    }
+    if (faceName(state.faces.up) !== stripFace) strip.push([(stripFace = faceName(state.faces.up))!, clockNow]);
+  }
+  return { shown, strip, state, faces };
+}
+same('the window: no delay, every change lands when it lands on the Words strip', [windowRun({ until: 10 }).shown, windowRun({ until: 10 }).strip], [
+  [['-', 0], ['Verse a', 0.1], ['Verse b', 4.1], ['-', 9.1]],
+  [['-', 0], ['Verse a', 0.1], ['Verse b', 4.1], ['-', 9.1]],
+]);
+same('the display delay: changes cued ahead come that much sooner, one due within it goes up now, and the strip keeps real time', [windowRun({ delay: 200, until: 10 }).shown, windowRun({ delay: 200, until: 10 }).strip], [
+  [['Verse a', 0], ['Verse b', 3.9], ['-', 8.9]],
+  [['-', 0], ['Verse a', 0.1], ['Verse b', 4.1], ['-', 9.1]],
+]);
+same('the display delay: a change to go up now cannot come sooner, a near one goes up now, and the fade stays', [
+  windowLib.scheduleCue({ seq: 1, text: 'Now', logo: false, changeAtMs: 1000, fadeMs: 250 }, 300, 1000).changeAtMs,
+  windowLib.scheduleCue({ seq: 2, text: 'Near', logo: false, changeAtMs: 1100, fadeMs: 500 }, 300, 1000),
+  windowLib.scheduleCue({ seq: 3, text: 'Later', logo: false, changeAtMs: 4000, fadeMs: 500 }, 300, 1000).changeAtMs,
+], [1000, { seq: 2, text: 'Near', logo: false, changeAtMs: 1000, fadeMs: 500 }, 3700]);
+same('Blank goes up at once on the window, however long the delay', windowRun({ delay: 500, until: 3, steps: [[2, blank]] }).shown, [['Verse a', 0], ['-', 2]]);
+
+const late = windowRun({ joinAt: 6, until: 10 });
+same('a window opened late: the slide the strip has up at once, fully faded in, then the next on time', [late.shown, windowRun({ joinAt: 6, until: 6 }).faces.p], [[['Verse b', 6], ['-', 9.1]], 1]);
+same('a window opened over Blank or the logo shows that, and one opened before any cue waits for the first', [
+  windowRun({ joinAt: 3, until: 4, steps: [[2, blank]] }).shown,
+  windowRun({ joinAt: 3, until: 4, steps: [[2, logo]] }).shown,
+  windowLib.catchUpCues(wordsLib.WORDS_START.display),
+], [[['-', 3]], [['logo', 3]], []]);
+same('catching up sends the slide up, then the one to come, so it reads the same as the strip', (() => {
+  const up = { seq: 7, text: 'A', logo: false, changeAtMs: 0, fadeMs: 250 };
+  const pending = { seq: 8, text: 'B', logo: false, changeAtMs: 9000, fadeMs: 500 };
+  return windowLib.catchUpCues({ seq: 8, up, pending }).reduce((held, cue) => cueLib.takeCue(held, cue, 5000), blankDisplay());
+})(), { seq: 8, up: { seq: 7, text: 'A', logo: false, changeAtMs: 0, fadeMs: 250 }, pending: { seq: 8, text: 'B', logo: false, changeAtMs: 9000, fadeMs: 500 } });
+
+const faceAt = (seq: number, text: string, changeAtMs = 0) => ({ seq, text, logo: false, changeAtMs, fadeMs: 250 });
+same('seq: an open window ignores a cue that arrives late, and a new strip, counting from later, still gets through', (() => {
+  let held = cueLib.takeCue(blankDisplay(), faceAt(101, 'New'), 10);
+  held = cueLib.takeCue(held, faceAt(100, 'Old'), 20);
+  const first = held.up?.text;
+  const again = wordsLib.tickWords(windowLib.wordsStartAt(5000), cueLib.lyricsCue(inVerse(10), cuePs, 110), { ctxNow: 110, ms: 110000 }).cues[0];
+  held = cueLib.takeCue(held, again, 110000);
+  return [first, held.up?.text, again.seq];
+})(), ['New', 'Verse a', 5001]);
+same('leaving Perform: black now, past the cue to come, and the state sends what is up again if the strip comes back', (() => {
+  let { state } = wordsLib.tickWords(windowLib.wordsStartAt(5000), cueLib.lyricsCue(inVerse(10), cuePs, 110), { ctxNow: 110, ms: 110000 });
+  const held = cueLib.takeCue(cueLib.takeCue(blankDisplay(), { seq: 5001, text: 'Verse a', logo: false, changeAtMs: 110000, fadeMs: 250 }, 110000), { seq: 5002, text: 'Verse b', logo: false, changeAtMs: 111000, fadeMs: 500 }, 110000);
+  const left = windowLib.leaveCue(state, 110500);
+  state = left.state;
+  const after = cueLib.takeCue(held, left.cue, 110500);
+  const back = wordsLib.tickWords(state, cueLib.lyricsCue(inVerse(10), cuePs, 110.6), { ctxNow: 110.6, ms: 110600 }).cues.map(cue => [cue.seq, cue.text]);
+  return [faceName(after.up), after.pending, left.cue.seq, back];
+})(), ['-', null, 5003, [[5004, 'Verse a'], [5005, 'Verse b']]]);
+
+const windowSteps: string[] = [];
+const inTurn = windowLib.oneAtATime();
+await Promise.all([
+  inTurn(async () => {
+    windowSteps.push('move starts');
+    await new Promise(done => setTimeout(done, 5));
+    windowSteps.push('move ends');
+  }),
+  inTurn(async () => void windowSteps.push('turn off')),
+  inTurn(async () => {
+    throw new Error('a job that fails');
+  }).catch(() => windowSteps.push('failure seen')),
+  inTurn(async () => void windowSteps.push('check')),
+]);
+same('open, close and checks: Turn off waits for a move under way, and a failed job does not stop the next', windowSteps, ['move starts', 'move ends', 'turn off', 'failure seen', 'check']);
+
+const screen = (id: string, isPrimary = false) => ({ id, name: `Monitor #${id}`, width: 1920, height: 1080, x: 0, y: 0, isPrimary });
+const mac = screen('mac', true);
+same('the screen offered first: a second one if there is one, else the only one; each named by its place', [
+  windowLib.defaultMonitor([mac, screen('tv')])?.id,
+  windowLib.defaultMonitor([screen('tv'), mac])?.id,
+  windowLib.defaultMonitor([mac])?.id,
+  windowLib.defaultMonitor([]),
+  windowLib.monitorChoices([mac, screen('tv'), screen('projector')]).map(monitor => monitor.id),
+  [mac, screen('tv'), screen('projector')].map((monitor, _, all) => windowLib.monitorLabel(monitor, all)),
+], ['tv', 'tv', 'mac', null, ['tv', 'projector', 'mac'], ['Main display', 'Display 2', 'Display 3']]);
+same('the button follows the truth: closed on its own, unplugged, opened before the strip came back, or fine', [
+  windowLib.syncDisplay('tv', null, [mac, screen('tv')]),
+  windowLib.syncDisplay('tv', 'mac', [mac]),
+  windowLib.syncDisplay(null, 'tv', [mac, screen('tv')]),
+  windowLib.syncDisplay('tv', 'tv', [mac, screen('tv')]),
+  windowLib.syncDisplay(null, null, [mac]),
+], [
+  { chosen: null, close: false },
+  { chosen: null, close: true },
+  { chosen: 'tv', close: false },
+  { chosen: 'tv', close: false },
+  { chosen: null, close: false },
+]);
+same('the display delay is saved with lead and fade: held to its range, and saving either keeps the other', [
+  wordsLib.parseDisplayDelay(null),
+  wordsLib.parseDisplayDelay('{"displayDelayMs":200}'),
+  wordsLib.parseDisplayDelay('{"displayDelayMs":9000}'),
+  wordsLib.parseDisplayDelay('{"displayDelayMs":-5}'),
+  wordsLib.parseDisplayDelay('{"displayDelayMs":"x"}'),
+  wordsLib.parseDisplayDelay('not json'),
+  JSON.parse(wordsLib.mergeLyricsPrefs('{"displayDelayMs":200}', { leadBeats: 3, fadeBeats: 0 })),
+  JSON.parse(wordsLib.mergeLyricsPrefs('{"leadBeats":3,"fadeBeats":0}', { displayDelayMs: 100 })),
+  JSON.parse(wordsLib.mergeLyricsPrefs('not json', { displayDelayMs: 100 })),
+  wordsLib.parseLyricsPrefs('{"leadBeats":3,"fadeBeats":0,"displayDelayMs":100}'),
+], [
+  0,
+  200,
+  500,
+  0,
+  0,
+  0,
+  { displayDelayMs: 200, leadBeats: 3, fadeBeats: 0 },
+  { leadBeats: 3, fadeBeats: 0, displayDelayMs: 100 },
+  { displayDelayMs: 100 },
+  { leadBeats: 3, fadeBeats: 0 },
+]);
+
+// The TV on AirPlay, from iPhone and iPad: its button, and what the page says to do.
+const tvMonitor = { id: windowLib.AIRPLAY_TV, name: 'TV', width: 1920, height: 1080, x: 0, y: 0, isPrimary: false };
+same('the Display button says where the words are: nothing to show on, a TV turned off, on the TV, and a Mac screen as before', [
+  windowLib.displayLabel(null, []),
+  windowLib.displayLabel(null, [tvMonitor]),
+  windowLib.displayLabel(windowLib.AIRPLAY_TV, [tvMonitor]),
+  windowLib.displayLabel('projector', [mac, screen('projector')]),
+  windowLib.displayLabel(null, [mac, screen('projector')]),
+], ['Display', 'Display', 'On TV', 'On Display 2', 'Display']);
+same('the button follows a TV: it connects on its own, stops mirroring, and a list a moment behind the window closes nothing', [
+  windowLib.syncDisplay(null, windowLib.AIRPLAY_TV, [tvMonitor]),
+  windowLib.syncDisplay(windowLib.AIRPLAY_TV, null, []),
+  windowLib.syncDisplay(windowLib.AIRPLAY_TV, null, [tvMonitor]),
+  windowLib.syncDisplay(null, windowLib.AIRPLAY_TV, []),
+], [
+  { chosen: windowLib.AIRPLAY_TV, close: false },
+  { chosen: null, close: false },
+  { chosen: null, close: false },
+  { chosen: windowLib.AIRPLAY_TV, close: false },
+]);
+same('what the picker says: how to reach the TV, what Turn off does, nothing to add, and the Mac as before', [
+  windowLib.displayHint(null, [], true)?.includes('Control Center'),
+  windowLib.displayHint(windowLib.AIRPLAY_TV, [tvMonitor], true)?.includes('back on the TV'),
+  windowLib.displayHint(null, [tvMonitor], true),
+  windowLib.displayHint(null, [mac], false)?.includes('⌘W'),
+  windowLib.displayHint('mac', [mac], false),
+  windowLib.displayHint(null, [mac, screen('projector')], false),
+], [true, true, null, true, null, null]);
+
+// Blank and Logo across songs. Each step is [song id, cue, press], and gives [mode, what is on the screen].
+const heldAcross = (steps: Array<[string | undefined, ReturnType<typeof cueLib.lyricsCue>, ((state: WordsState) => WordsState)?]>) => {
+  let state = wordsLib.WORDS_START;
+  return steps.map(([song, cue, press]) => {
+    state = wordsLib.tickWords(press ? press(state) : state, cue, { ctxNow: 110, ms: 110000 }, song).state;
+    return [state.mode, faceText(state)];
+  });
+};
+const wordsCue = cueLib.lyricsCue(inVerse(10), cuePs, 110);
+const padCue = cueLib.lyricsCue({ ...inVerse(10), song: null }, null, 50);
+const noWordsCue = cueLib.lyricsCue(inVerse(10), psOf(cueBase), 110);
+const comingCue = { ...wordsCue, now: null, since: null };
+same('a new song with words lets go of a Logo from between songs, and the logo stays up until its first slide is due', heldAcross([
+  [undefined, padCue, logo],
+  ['b', comingCue],
+  ['b', wordsCue],
+]), [['logo', 'logo'], ['words', 'logo'], ['words', 'Verse a']]);
+same('Blank pressed once the song is under way still holds', heldAcross([
+  ['b', wordsCue],
+  ['b', wordsCue, blank],
+  ['b', wordsCue],
+]), [['words', 'Verse a'], ['blank', '-'], ['blank', '-']]);
+same('a song with no words keeps the hold, and the next song with words lets go of it', heldAcross([
+  [undefined, padCue, logo],
+  ['c', noWordsCue],
+  ['d', wordsCue],
+]), [['logo', 'logo'], ['logo', 'logo'], ['words', 'Verse a']]);
+same('going back to the song that just ended counts as new, so Blank from the pad between lets go', heldAcross([
+  ['a', wordsCue],
+  [undefined, padCue, blank],
+  ['a', wordsCue],
+]), [['words', 'Verse a'], ['blank', '-'], ['words', 'Verse a']]);
+
+// Words typed or pasted into the Lyrics panel, placed with no times. 120 BPM in 4/4. Words are made up.
+{
+  const fullSong = barSong([['intro', 0, 0], ['verse', 2], ['chorus', 10], ['verse', 14], ['chorus', 22], ['instrumental', 26], ['bridge', 30], ['chorus', 34]], 38);
+  /** Each section with words: its slides, lines joined by '/', slides by ' | '. */
+  const shown = (song: PlacedSong) =>
+    Object.fromEntries(map.sectionViews(song).filter(v => v.section.lyric).map(v => [v.name, song.lyrics!.blocks[v.section.lyric!.block].map(s => s.join('/')).join(' | ')]));
+  const barsOf = (song: PlacedSong) => Object.fromEntries(map.sectionViews(song).filter(v => v.section.lyric).map(v => [v.name, v.section.lyric!.slideBars]));
+  const blockOf = (song: PlacedSong) => Object.fromEntries(map.sectionViews(song).filter(v => v.section.lyric).map(v => [v.name, v.section.lyric!.block]));
+  const typed = (song: PlacedSong, text: string) => lyricsEdit.typeWords(song, text);
+
+  same('typed text: any line ending, a blank line, a lone dash or a heading ends a group; headings never reach the screen; a line that only starts like one stays', place.typedGroups(
+    '  One \r\nTwo\r\n\r\n\r\n[Chorus]\n\nThree\nVerse 2:\nFour\n(Bridge)\nFive\n-\nSix\nChorus (x2)\nBridge over the water\n[Music]\n♪ Seven ♪ here\n',
+  ), [
+    { heading: null, lines: ['One', 'Two'] },
+    { heading: 'Chorus', lines: ['Three'] },
+    { heading: 'Verse 2', lines: ['Four'] },
+    { heading: 'Bridge', lines: ['Five'] },
+    { heading: null, lines: ['Six'] },
+    { heading: 'Chorus', lines: ['Bridge over the water'] },
+    { heading: 'Music', lines: ['Seven here'] },
+  ]);
+  same('typed text: a long line splits as found lines do, and nothing to show is no groups', [
+    place.typedGroups('Alpha beta gamma delta, epsilon zeta eta theta iota'),
+    place.typedGroups(' \n\n-\n[Chorus]\n'),
+  ], [[{ heading: null, lines: ['Alpha beta gamma delta,', 'epsilon zeta eta theta iota'] }], []]);
+
+  const sheet = typed(fullSong, 'a1\na2\na3\na4\n\nb1\nb2\n\nc1\nc2\nc3\nc4\n\nb1\nb2\n\nd1\nd2\n\nb1\nb2');
+  same('one group per section: in order, past the intro and the instrumental, the slides evenly on the bars', [shown(sheet), barsOf(sheet)], [
+    { 'Verse 1': 'a1/a2 | a3/a4', 'Chorus 1': 'b1/b2', 'Verse 2': 'c1/c2 | c3/c4', 'Chorus 2': 'b1/b2', Bridge: 'd1/d2', 'Chorus 3': 'b1/b2' },
+    { 'Verse 1': [0, 4], 'Chorus 1': [0], 'Verse 2': [0, 4], 'Chorus 2': [0], Bridge: [0], 'Chorus 3': [0] },
+  ]);
+  same('a chorus typed three times shares one block; the verses, with other words, do not', blockOf(sheet), {
+    'Verse 1': 'verse-1', 'Chorus 1': 'chorus', 'Verse 2': 'verse-2', 'Chorus 2': 'chorus', Bridge: 'bridge', 'Chorus 3': 'chorus',
+  });
+
+  const shortSong = barSong([['verse', 0], ['chorus', 8], ['verse', 12]], 20);
+  const allLines = Array.from({ length: 20 }, (_, i) => `L${i + 1}`);
+  const spread = typed(shortSong, allLines.join('\n'));
+  same('no blank lines at all: the lines spread over the sections by their bars, each once and in order', [shown(spread), barsOf(spread), Object.values(spread.lyrics!.blocks).flat(2)], [
+    { 'Verse 1': 'L1/L2 | L3/L4 | L5/L6 | L7/L8', Chorus: 'L9/L10 | L11/L12', 'Verse 2': 'L13/L14 | L15/L16 | L17/L18 | L19/L20' },
+    { 'Verse 1': [0, 2, 4, 6], Chorus: [0, 2], 'Verse 2': [0, 2, 4, 6] },
+    allLines,
+  ]);
+
+  const stanzas = typed({ ...barSong([['verse', 0], ['chorus', 16]], 24), lyricsPlacing: { linesPerSlide: 4, autoOffset: false } }, 'a\nb\nc\nd\n\ne\nf\ng\nh\n\ni\nj\nk\nl');
+  same('more groups than sections: groups stay whole, the longer section takes more, and a group break starts a slide', [shown(stanzas), barsOf(stanzas)], [
+    { Verse: 'a/b/c/d | e/f/g/h', Chorus: 'i/j/k/l' },
+    { Verse: [0, 8], Chorus: [0] },
+  ]);
+  same('fewer groups than sections: in order, and the sections left over stay blank rather than guess', [shown(typed(shortSong, 'a\n\nb')), lyricsEdit.sectionsWithoutWords(typed(shortSong, 'a\n\nb'))], [
+    { 'Verse 1': 'a', Chorus: 'b' },
+    ['Verse 2'],
+  ]);
+
+  const headed = typed(fullSong, 'Verse 1\na1\na2\n\nChorus\nb1\nb2\n\nVerse 2\nc1\nc2\n\n[Bridge]\nd1\nd2\n\n[Outro]\ne1');
+  same('headings send words to their sections; a chorus named once fills every chorus; words under a heading the song lacks stay with the section above', [shown(headed), blockOf(headed)['Chorus 3']], [
+    { 'Verse 1': 'a1/a2', 'Chorus 1': 'b1/b2', 'Verse 2': 'c1/c2', 'Chorus 2': 'b1/b2', Bridge: 'd1/d2 | e1', 'Chorus 3': 'b1/b2' },
+    'chorus',
+  ]);
+  same('a chorus heading used each time fills the choruses in order, and a heading can put words in the intro', shown(typed(fullSong, '[Intro]\nz\n[Chorus]\nb\n[Chorus]\nbb\n[Chorus]\nbbb')), {
+    Intro: 'z', 'Chorus 1': 'b', 'Chorus 2': 'bb', 'Chorus 3': 'bbb',
+  });
+
+  // Edit words: the text shows each section's name, so saving leaves every word on its own section.
+  const gappy = typed(fullSong, '[Verse 1]\na1\na2\n\n[Chorus 1]\nb1\nb2\n\n[Chorus 2]\nb1\nb2\n\n[Bridge]\nd1\n\n[Chorus 3]\nb1\nb2');
+  const gappyText = '[Verse 1]\na1\na2\n\n[Chorus 1]\nb1\nb2\n\n[Verse 2]\n\n[Chorus 2]\nb1\nb2\n\n[Bridge]\nd1\n\n[Chorus 3]\nb1\nb2';
+  same('edit words: the box shows the words under section names, with a sung section that has none, and no text for a song with none', [lyricsEdit.lyricsText(gappy), lyricsEdit.lyricsText(fullSong)], [gappyText, '']);
+  same('edit words: saving the text as it is, or with only spacing changed, changes nothing', [
+    typed(gappy, gappyText) === gappy,
+    typed(gappy, gappyText.replace('a1', '  a1 ').replace(/\n\n/g, '\n\n\n')) === gappy,
+  ], [true, true]);
+  same('edit words: a section stays blank when another changes, and clearing a section leaves the others where they are', [
+    shown(typed(gappy, gappyText.replace('d1', 'd9'))),
+    shown(typed(gappy, gappyText.replace('[Chorus 1]\nb1\nb2', '[Chorus 1]'))),
+    shown(typed(gappy, gappyText.replace('[Verse 2]', '[Verse 2]\nc1'))),
+  ], [
+    { 'Verse 1': 'a1/a2', 'Chorus 1': 'b1/b2', 'Chorus 2': 'b1/b2', Bridge: 'd9', 'Chorus 3': 'b1/b2' },
+    { 'Verse 1': 'a1/a2', 'Chorus 2': 'b1/b2', Bridge: 'd1', 'Chorus 3': 'b1/b2' },
+    { 'Verse 1': 'a1/a2', 'Chorus 1': 'b1/b2', 'Verse 2': 'c1', 'Chorus 2': 'b1/b2', Bridge: 'd1', 'Chorus 3': 'b1/b2' },
+  ]);
+  // 11 of 12 words the same: found lines would share a block here, and the changed word would be lost.
+  const chorusWords = 'one two three four five six\nseven eight nine ten eleven twelve';
+  const oneWord = typed(fullSong, `[Chorus 1]\n${chorusWords}\n\n[Chorus 2]\n${chorusWords}\n\n[Chorus 3]\n${chorusWords.replace('twelve', 'twelfth')}`);
+  same('edit words: one word changed in one long chorus stays changed, on a block of its own', [shown(oneWord)['Chorus 3'], blockOf(oneWord)], [
+    'one two three four five six/seven eight nine ten eleven twelfth',
+    { 'Chorus 1': 'chorus', 'Chorus 2': 'chorus', 'Chorus 3': 'chorus-3' },
+  ]);
+
+  const foundSong = {
+    ...shortSong,
+    lyrics: { source: 'youtube-auto', offset: 0.5, leadBeats: 3, fadeBeats: 1.5, blocks: {} },
+    timedLyrics: [line(0.1, 1.9, 'Found words', 'auto')],
+    lyricsPlacing: { linesPerSlide: 3, autoOffset: true },
+  } as PlacedSong;
+  const frozen = JSON.stringify(foundSong);
+  const saved = typed(foundSong, '[Verse 1]\na\nb\nc\nd');
+  const { blocks: _blocks, ...savedLyrics } = saved.lyrics!;
+  same('saving: source manual, no nudge, lead and fade kept, its lines per slide used, the found lines gone so Place again cannot bring them over the typed words', [
+    savedLyrics,
+    saved.lyricsPlacing,
+    'timedLyrics' in saved,
+    shown(saved),
+    lyricsEdit.placeAgain(saved),
+    lyricsEdit.laneSlides(saved).some(x => x.check),
+    JSON.stringify(foundSong) === frozen,
+  ], [
+    { source: 'manual', offset: 0, leadBeats: 3, fadeBeats: 1.5 },
+    { linesPerSlide: 3, autoOffset: false },
+    false,
+    { 'Verse 1': 'a/b/c | d' },
+    null,
+    false,
+    true,
+  ]);
+  const noSections = barSong([], 8);
+  same('saving nothing, or with no sections to put words on, leaves the song alone', [typed(foundSong, ' \n\n') === foundSong, typed(noSections, 'a') === noSections], [true, true]);
+  same('a song with only an intro and an instrumental still takes the words, so typed text is never thrown away', shown(typed(barSong([['intro', 0, 0], ['instrumental', 4]], 8), 'a\n\nb')), { Intro: 'a', Instrumental: 'b' });
+
+  const fixedThenOne = lyricsEdit.placeWordsAgain(lyricsEdit.setSlideText(typed(shortSong, '[Verse 1]\nv1\nv2\n\n[Chorus]\nc1\nc2'), 's0', 0, 'v1 fixed\nv2'), 1);
+  same('lines on a slide, typed words: placed again from what the slides say now, on the same sections', [shown(fixedThenOne), barsOf(fixedThenOne), fixedThenOne.lyricsPlacing?.linesPerSlide], [
+    { 'Verse 1': 'v1 fixed | v2', Chorus: 'c1 | c2' },
+    { 'Verse 1': [0, 4], Chorus: [0, 2] },
+    1,
+  ]);
+  same('place again, found words: goes the way it always did', [
+    lyricsEdit.placeWordsAgain(timedSong, 1).lyrics?.blocks,
+    lyricsEdit.placeWordsAgain(editBase) === editBase,
+  ], [lyricsEdit.placeAgain(timedSong, { linesPerSlide: 1 })!.song.lyrics?.blocks, true]);
+
+  const twoChoruses = typed(barSong([['chorus', 0], ['chorus', 4]], 8), '[Chorus]\nA\n\nB');
+  same('a chorus named once repeats whole, with the groups under its heading, on one block', [shown(twoChoruses), blockOf(twoChoruses)], [
+    { 'Chorus 1': 'A | B', 'Chorus 2': 'A | B' },
+    { 'Chorus 1': 'chorus', 'Chorus 2': 'chorus' },
+  ]);
+  const verseChorus = barSong([['verse', 0], ['chorus', 4]], 8);
+  const oddSlide = lyricsEdit.setSlideText(typed(verseChorus, '[Verse]\nv1'), 's0', 0, 'Chorus\n[Ooh]');
+  same('placing typed words again keeps slide text that reads like a heading, on its own section', shown(lyricsEdit.placeWordsAgain(oddSlide, 2)), { Verse: 'Chorus/[Ooh]' });
+
+  const tight = typed(barSong([['verse', 0], ['chorus', 2]], 4), '[Verse]\na\nb\nc\n\nd\ne\nf\n\ng\nh\ni');
+  same('more slides than bars: the bars win, one slide a bar, and every line stays in order', [shown(tight), barsOf(tight)], [{ Verse: 'a/b/c/d/e | f/g/h/i' }, { Verse: [0, 1] }]);
+}
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);

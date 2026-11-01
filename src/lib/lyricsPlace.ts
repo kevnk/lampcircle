@@ -1,6 +1,6 @@
-import type { Lyrics, SectionLyric, Song, TimedLine } from '../types';
-import { cleanLines, findLyrics, withFoundLyrics, type FoundLyrics, type LyricsDeps } from './lyricsFetch';
-import { SECTION_TYPES, beatPos, beatTime, median, sectionViews, songGrid, upper, type Grid, type SectionView } from './songMap';
+import type { Lyrics, SectionLyric, SectionType, Song, TimedLine } from '../types';
+import { cleanLines, cleanText, findLyrics, withFoundLyrics, type FoundLyrics, type LyricsDeps } from './lyricsFetch';
+import { SECTION_TYPES, beatPos, beatTime, median, sectionViews, songGrid, typeFromName, upper, type Grid, type SectionView } from './songMap';
 
 export interface PlaceOptions {
   /** Where the words came from, kept as `lyrics.source`. */
@@ -64,25 +64,7 @@ export function placeLyrics(song: Song, lines: TimedLine[], options: PlaceOption
     (i < 0 ? unplaced : bySection[i]).push(line);
   }
   const slides = views.map((view, i) => (bySection[i].length ? slidesIn(view, bySection[i], grid, perSlide, song.beatsPerBar) : []));
-
-  const groups: Array<{ id: string; text: string[][]; members: SectionView[] }> = [];
-  views.forEach((view, i) => {
-    if (!slides[i].length) return;
-    const text = slides[i].map(slide => slide.lines.map(line => line.text));
-    const group = groups.find(item => item.members[0].section.type === view.section.type && sameWords(item.text, text));
-    if (group) group.members.push(view);
-    else groups.push({ id: '', text, members: [view] });
-  });
-  const taken = new Set<string>();
-  for (const group of groups) {
-    const first = group.members[0];
-    const label = SECTION_TYPES.find(item => item.type === first.section.type)?.label ?? first.name;
-    const base = slug(group.members.length > 1 ? label : first.name);
-    let id = base;
-    for (let k = 2; taken.has(id); k++) id = `${base}-${k}`;
-    taken.add(id);
-    group.id = id;
-  }
+  const groups = sharedBlocks(views, slides.map(own => own.map(slide => slide.lines.map(line => line.text))), sameWords);
 
   const sectionLyrics: Record<string, SectionLyric> = {};
   const checkWords: Record<string, number[]> = {};
@@ -101,6 +83,161 @@ export function placeLyrics(song: Song, lines: TimedLine[], options: PlaceOption
     checkWords,
     offsetUsed,
     offsetEstimated,
+  };
+}
+
+/** Sections of a type with the same words share a block, named for the type. `texts` is each view's slides, by index. */
+function sharedBlocks(views: SectionView[], texts: string[][][], same: (a: string[][], b: string[][]) => boolean) {
+  const groups: Array<{ id: string; text: string[][]; members: SectionView[] }> = [];
+  views.forEach((view, i) => {
+    if (!texts[i].length) return;
+    const group = groups.find(item => item.members[0].section.type === view.section.type && same(item.text, texts[i]));
+    if (group) group.members.push(view);
+    else groups.push({ id: '', text: texts[i], members: [view] });
+  });
+  const taken = new Set<string>();
+  for (const group of groups) {
+    const first = group.members[0];
+    const label = SECTION_TYPES.find(item => item.type === first.section.type)?.label ?? first.name;
+    const base = slug(group.members.length > 1 ? label : first.name);
+    let id = base;
+    for (let k = 2; taken.has(id); k++) id = `${base}-${k}`;
+    taken.add(id);
+    group.id = id;
+  }
+  return groups;
+}
+
+/** Words typed or pasted in: lines, and the heading above them when there was one. */
+export interface TypedGroup {
+  heading: string | null;
+  lines: string[];
+}
+
+const NAMED_HEADING = /^(intro|verse|pre[- ]?chorus|chorus|refrain|bridge|tag|interlude|instrumental|outro|ending|hook)\s*\d*$/i;
+
+/** What a line names when that's all it says: "[Chorus]", "Verse 2:", "(Bridge)", "Chorus x2". Anything in square brackets counts. */
+function headingOf(row: string): string | null {
+  const inner = /^\s*\[(.*)\]\s*:?\s*$/.exec(row)?.[1];
+  const label = (inner ?? row)
+    .trim()
+    .replace(/\s*:$/, '')
+    .replace(/\s*\(?\s*(?:[x×]\s*\d+|\d+\s*[x×])\s*\)?$/i, '')
+    .replace(/^\(\s*|\s*\)$/g, '')
+    .trim();
+  return inner !== undefined || NAMED_HEADING.test(label) ? label : null;
+}
+
+/** Typed words as groups of lines. A blank line, a lone '-' or a heading ends a group, and long lines split as found lines do. */
+export function typedGroups(text: string): TypedGroup[] {
+  const groups: TypedGroup[] = [{ heading: null, lines: [] }];
+  for (const row of text.split(/\r\n?|\n/)) {
+    const heading = headingOf(row);
+    const clean = heading === null ? cleanText(row) : '';
+    const last = groups[groups.length - 1];
+    if (clean && clean !== '-') last.lines.push(...splitLong({ start: 0, end: 0, text: clean, kind: 'manual' }).map(line => line.text));
+    else if (heading !== null || last.lines.length) groups.push({ heading, lines: [] });
+  }
+  return groups.filter(group => group.lines.length);
+}
+
+/** The sections that take words with no heading to say where: all but the intro and instrumental, unless that's all there is. */
+export function wordSections(views: SectionView[]): SectionView[] {
+  const sung = views.filter(view => view.section.type !== 'intro' && view.section.type !== 'instrumental');
+  return sung.length ? sung : views;
+}
+
+/**
+ * Which groups go on which section. Headings that name sections decide, and a group with no heading stays with the
+ * section above it. A number-less heading like "Chorus" takes the next chorus, and the first one also fills any chorus
+ * left without words, for a lyric sheet that writes it once. With no such headings, groups go on the sections in order:
+ * too few leave the last sections blank, and too many share by the sections' bars. Words are never dropped.
+ * ponytail: plain text never guesses where a chorus written once repeats, since a wrong guess shifts later words. A heading settles it.
+ */
+function assignTyped(groups: TypedGroup[], views: SectionView[]): Map<SectionView, string[][]> {
+  const runs = new Map<SectionView, string[][]>();
+  const targets = wordSections(views);
+  const exact = (view: SectionView, label: string) => view.name.toLowerCase() === label.toLowerCase();
+  const ofType = (view: SectionView, label: string) => {
+    const type = typeFromName(label.toLowerCase().replace(/^pre /, 'pre-'));
+    return type !== 'custom' && view.section.type === type;
+  };
+  if (groups.some(({ heading }) => heading && views.some(view => exact(view, heading) || ofType(view, heading)))) {
+    const repeats = new Map<SectionType, SectionView>();
+    let at: SectionView | undefined;
+    for (const { heading, lines } of groups) {
+      const named = heading ? views.find(view => exact(view, heading) && !runs.has(view)) ?? views.find(view => exact(view, heading)) ?? views.find(view => ofType(view, heading) && !runs.has(view)) : undefined;
+      at = named ?? at ?? targets[0];
+      runs.set(at, [...(runs.get(at) ?? []), lines]);
+      if (named && named.section.type !== 'custom' && !/\d/.test(heading!) && !repeats.has(named.section.type)) repeats.set(named.section.type, named);
+    }
+    for (const view of views) {
+      const first = repeats.get(view.section.type);
+      if (first && !runs.has(view)) runs.set(view, runs.get(first)!);
+    }
+    return runs;
+  }
+  // No blank lines at all: any line can start a section.
+  const free = groups.length === 1;
+  const parts = free ? groups[0].lines.map(line => [line]) : groups.map(group => group.lines);
+  const bars = (view: SectionView) => view.e - view.s;
+  const perBar = parts.flat().length / targets.reduce((sum, view) => sum + bars(view), 0);
+  let next = 0;
+  let placed = 0;
+  let wanted = 0;
+  targets.forEach((view, i) => {
+    if (next >= parts.length) return;
+    wanted += perBar * bars(view);
+    const run: string[][] = [];
+    // One group at least, then more while that's closer to the section's share, leaving one for each section after.
+    do {
+      run.push(parts[next]);
+      placed += parts[next++].length;
+    } while (parts.length - next > targets.length - i - 1 && Math.abs(placed + parts[next].length - wanted) <= Math.abs(placed - wanted));
+    runs.set(view, free ? [run.flat()] : run);
+  });
+  return runs;
+}
+
+const chunks = <T>(items: T[], size: number): T[][] => Array.from({ length: Math.ceil(items.length / size) }, (_, i) => items.slice(i * size, (i + 1) * size));
+
+/** Typed text placed on the song's sections with no times to go by. See `assignTyped` and `placeRuns`. */
+export function placeTyped(song: Song, text: string, linesPerSlide = 2): Placement {
+  const views = sectionViews(song);
+  const groups = typedGroups(text);
+  return placeRuns(song, views.length && groups.length ? assignTyped(groups, views) : new Map(), linesPerSlide);
+}
+
+/**
+ * Lines already on their sections, as slides: each group as slides of `linesPerSlide` lines, a group break starting a
+ * slide, the slides evenly over the section's bars. With more slides than bars, the bars win: one slide a bar, lines
+ * kept in order. Sections share a block only when their words are exactly the same, so a word changed in one chorus
+ * stays changed. `runs` is keyed by this song's `sectionViews`.
+ */
+export function placeRuns(song: Song, runs: Map<SectionView, string[][]>, linesPerSlide = 2): Placement {
+  const views = sectionViews(song);
+  const perSlide = Math.min(4, Math.max(1, Math.round(linesPerSlide)));
+  const texts = views.map(view => {
+    const run = runs.get(view) ?? [];
+    const slides = run.flatMap(lines => chunks(lines, perSlide));
+    const bars = view.e - view.s;
+    return slides.length <= bars ? slides : chunks(run.flat(), Math.ceil(run.flat().length / bars));
+  });
+  const blocks = sharedBlocks(views, texts, (a, b) => JSON.stringify(a) === JSON.stringify(b));
+  const sectionLyrics: Record<string, SectionLyric> = {};
+  for (const block of blocks) {
+    for (const view of block.members) {
+      const own = texts[view.index];
+      sectionLyrics[view.section.id] = { block: block.id, slideBars: own.map((_, i) => Math.floor((i * (view.e - view.s)) / own.length)) };
+    }
+  }
+  return {
+    lyrics: { source: 'manual', offset: 0, blocks: Object.fromEntries(blocks.map(block => [block.id, block.text])) },
+    sectionLyrics,
+    unplaced: [],
+    checkWords: {},
+    offsetUsed: 0,
+    offsetEstimated: false,
   };
 }
 

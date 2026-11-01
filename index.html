@@ -13,6 +13,8 @@
     <meta name="apple-mobile-web-app-title" content="Lamp Circle" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <script>
+      // The room's screen is black from its first paint.
+      if (location.search.includes('window=lyrics')) document.documentElement.classList.add('lyrics-window');
       // Dark before the first paint, so a dark room never sees a light flash. src/theme.ts keeps it in step.
       let saved = null;
       try {

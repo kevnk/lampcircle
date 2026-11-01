@@ -1,5 +1,6 @@
 //! The iPhone and iPad side: the audio session, keeping the screen on, songs from the Files app,
-//! and a debug-only seed for simulator screenshots. Library and Perform call these only on iOS.
+//! and a debug-only seed for simulator screenshots. Library and Perform call these only on iOS, apart from
+//! keeping the screen on, which Perform also does on the Mac.
 
 use serde::Serialize;
 use tauri::ipc::Response;
@@ -80,7 +81,8 @@ pub async fn pick_import_files(app: AppHandle) -> Result<Response> {
     Ok(Response::new(frame(None, files)?))
 }
 
-/// Keeps the screen on while Perform is open, so the phone never locks mid-song. Nothing to do on the Mac.
+/// Keeps the screen on during Perform, so the phone never locks mid-song and a Mac's display, with the words on the
+/// second screen, never sleeps through a long song.
 #[tauri::command]
 pub fn set_keep_awake(app: AppHandle, enabled: bool) -> Result<()> {
     #[cfg(target_os = "ios")]
@@ -90,8 +92,34 @@ pub fn set_keep_awake(app: AppHandle, enabled: bool) -> Result<()> {
         }
     })?;
     #[cfg(not(target_os = "ios"))]
-    let _ = (app, enabled);
+    let _ = app;
+    #[cfg(target_os = "macos")]
+    hold_mac_awake(enabled);
+    #[cfg(not(any(target_os = "ios", target_os = "macos")))]
+    let _ = enabled;
     Ok(())
+}
+
+/// One caffeinate at most. `-w` ends it with this app, even after a crash, so it can't keep the Mac awake for good.
+#[cfg(target_os = "macos")]
+fn hold_mac_awake(enabled: bool) {
+    use std::process::{Child, Command};
+    use std::sync::Mutex;
+
+    static HOLD: Mutex<Option<Child>> = Mutex::new(None);
+    let mut hold = HOLD.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(mut held) = hold.take() {
+        let _ = held.kill();
+        let _ = held.wait();
+    }
+    if enabled {
+        let pid = std::process::id().to_string();
+        *hold = Command::new("/usr/bin/caffeinate")
+            .args(["-d", "-i", "-w", &pid])
+            .spawn()
+            .inspect_err(|error| log::warn!("Could not keep the display on: {error}"))
+            .ok();
+    }
 }
 
 /// Debug builds only: hands over every file in <app data>/dev-seed once, for simulator screenshots,

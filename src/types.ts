@@ -52,9 +52,9 @@ export interface Lyrics {
   source?: string;
   /** Seconds the words were nudged when they were placed. Playback never reads it. */
   offset?: number;
-  /** Slides change this many beats before their bar, 0 to 8 in half beats. Missing means the app default, 2. */
+  /** Slides change this many beats before their bar, 0 to 8 in half beats. Missing means the app's default, set on Perform and 2 until then. */
   leadBeats?: number;
-  /** Beats a slide takes to fade out and in. Missing means the app default, 1. */
+  /** Beats a slide takes to fade out and in. Missing means the app's default, set on Perform and 1 until then. */
   fadeBeats?: number;
   /** Block id to its slides, each slide the lines on screen. An empty slide is a deliberate blank. */
   blocks: Record<string, string[][]>;
@@ -88,6 +88,8 @@ export interface Song {
   lyrics?: Lyrics;
   /** The timed lines Find lyrics found, kept in the app for placement. Never written to a .djw. */
   timedLyrics?: TimedLine[];
+  /** How the timed lines were last placed, so Place again and the nudge place them the same way. Never written to a .djw. */
+  lyricsPlacing?: { linesPerSlide: number; autoOffset: boolean };
   /** Seconds. The last section ends here. */
   marksEnd: number;
   refined: boolean;
