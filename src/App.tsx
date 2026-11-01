@@ -39,9 +39,6 @@ function Shell() {
       <>
         <main className="min-w-0 pb-[calc(6rem_+_env(safe-area-inset-bottom))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pt-[calc(1rem_+_env(safe-area-inset-top))]">
           <Page route={route} />
-          <div className="mt-10 max-w-xs">
-            <ThemeSwitch />
-          </div>
         </main>
         <TabBar route={route} />
       </>

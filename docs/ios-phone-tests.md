@@ -1,6 +1,6 @@
 # iPhone tests for branch `ios-followups`
 
-**None of this has run on a phone yet.** The code compiles and its logic tests pass, but only a real iPhone can show how audio behaves. Run these before you lead a set with this build. They take about 20 minutes.
+**None of this has run on a phone yet.** The code compiles and its logic tests pass, but only a real iPhone can show how audio behaves. Run these before you lead a set with this build. They take about 30 minutes.
 
 Tests 1 and 4 matter most. If either fails, don't use this build for a set.
 
@@ -82,6 +82,24 @@ Look at the home screen, the search results and Settings. You should see the lan
 ### 11. The next TestFlight upload
 
 Watch for an App Store Connect warning about document types. This branch replaces `UISupportsDocumentBrowser` with `LSSupportsOpeningDocumentsInPlace = NO`. Apple's check should accept that, but no upload has tried it yet.
+
+### 12. The Settings sheet
+
+Tap the Settings tab, at the right of the bottom bar. The sheet should fill the screen, clear of the notch and the home bar, with Done at the top right.
+
+1. **Theme.** Change Appearance to Light, Dark and Auto. The whole app should change behind the sheet.
+2. **Back up, and check the file.** This is the only copy of a library that lives on one phone, so check it properly.
+   1. Tap **Back up library**. The percent should climb, then the save dialog should open.
+   2. Save to iCloud Drive or On My iPhone. The sheet should say **Saved**, and the file in the Files app should be about the size of your library.
+   3. Tap it again and cancel the dialog. The sheet should say the backup was cancelled.
+   4. If the app goes blank or restarts during a large backup, stop and report the library's size. A backup needs free space of about twice the library until it's saved, or the sheet should say there's no space.
+3. **Restore.** Remove one song from Library, then tap **Restore from a backup** and pick the file you saved.
+   1. The sheet should say what it added, and the song should play with its sound.
+   2. Pick the same file again. It should say there is nothing new to add.
+   3. Pick a file that isn't a backup. It should say so, and change nothing.
+   4. If the backup file is greyed out in the picker, stop and report it.
+4. **Feedback.** Tap **Send feedback**, write a test note and tap Send. The keyboard should not hide the note. A test build without the relay address should say feedback isn't set up.
+5. **The rest.** About should show this build's version. Turn a Privacy box off, close the sheet and reopen it. The box should still be off. Set **When Lamp Circle opens** to Start at the Library, then force-quit and reopen. It should open on Library.
 
 ## Why a tap in Files doesn't open the app
 

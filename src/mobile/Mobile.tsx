@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ListMusic, ListOrdered, Play, Share } from 'lucide-react';
+import { ListMusic, ListOrdered, Play, Settings, Share } from 'lucide-react';
 import type { JumpAt, Song, WorshipSet } from '../types';
 import { go, parseRoute, useStore, type Route } from '../store';
 import { Button, Card, SongHeader, StepPills, beatsLabel } from '../ui';
@@ -10,6 +10,7 @@ import { fileNameFor } from '../lib/library';
 import { bpmOf, checks, isReady, keysText, sectionViews, songGrid, songKeys, uid } from '../lib/songMap';
 import { openFiles } from '../screens/Library';
 import { doneSteps, stepNav } from '../screens/SongTap';
+import { SettingsSheet } from './SettingsSheet';
 
 /** Milliseconds WebKit gets to stop the audio clock after iOS reports an interruption. */
 const INTERRUPTION_CHECK = 500;
@@ -118,12 +119,14 @@ const TABS = [
   ['Library', ListMusic],
   ['Sets', ListOrdered],
   ['Perform', Play],
+  ['Settings', Settings],
 ] as const;
 
 /** The iPhone and iPad navigation, in place of the Mac's sidebar. Perform covers it while a set plays. */
 export function TabBar({ route }: { route: Route }) {
   const { sets, songs } = useStore();
   const [hint, setHint] = useState<string | null>(null);
+  const [settings, setSettings] = useState(false);
   useEffect(() => {
     if (!hint) return;
     const timer = window.setTimeout(() => setHint(null), 4000);
@@ -143,7 +146,8 @@ export function TabBar({ route }: { route: Route }) {
     setHint(items.length ? `Finish the songs in ${set.name}, then Perform plays it.` : `Add ready songs to ${set.name}, then Perform plays it.`);
   };
 
-  const active = { Library: route.page === 'library' || route.page === 'song', Sets: route.page === 'sets', Perform: false };
+  const active = { Library: route.page === 'library' || route.page === 'song', Sets: route.page === 'sets', Perform: false, Settings: false };
+  const open = { Library: () => go({ page: 'library' }), Sets: () => go({ page: 'sets' }), Perform: perform, Settings: () => setSettings(true) };
   return (
     <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-side/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
       {hint && (
@@ -151,14 +155,15 @@ export function TabBar({ route }: { route: Route }) {
           {hint}
         </p>
       )}
-      <ul className="grid grid-cols-3 px-[max(0.5rem,env(safe-area-inset-left))]">
+      {settings && <SettingsSheet onClose={() => setSettings(false)} />}
+      <ul className="grid grid-cols-4 px-[max(0.5rem,env(safe-area-inset-left))]">
         {TABS.map(([label, Icon]) => (
           <li key={label}>
             <button
               type="button"
               aria-current={active[label] ? 'page' : undefined}
               className={`flex w-full flex-col items-center gap-0.5 pb-1.5 pt-2 text-xs ${active[label] ? 'font-semibold text-amber' : 'text-ink/70'}`}
-              onClick={() => (label === 'Perform' ? perform() : go({ page: label === 'Library' ? 'library' : 'sets' }))}
+              onClick={open[label]}
             >
               <Icon className={`h-6 w-6 ${active[label] ? 'drop-shadow-[0_0_6px_rgb(var(--accent)/var(--glow))]' : ''}`} aria-hidden />
               {label}
