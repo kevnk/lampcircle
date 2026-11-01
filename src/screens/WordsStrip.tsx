@@ -23,16 +23,16 @@ export function WordsStrip({ session, song }: { session: PerformSession; song: S
   const ms = Date.now();
   const ps = session.ps;
   const cue = lyricsCue(snap, ps, ctxNow, prefs);
-  const tick = (latest: LyricsCue, at: number, atMs: number) => {
-    const step = tickWords(holder.current, latest, { ctxNow: at, ms: atMs });
+  const tick = (latest: LyricsCue, at: number, atMs: number, playing: string | undefined) => {
+    const step = tickWords(holder.current, latest, { ctxNow: at, ms: atMs }, playing);
     holder.current = step.state;
     sendCues(step.cues, atMs);
   };
   const link = useDisplayLink(holder, () => {
     const at = now();
-    tick(lyricsCue(session.snapshot(), session.ps, at, prefs), at, Date.now());
+    tick(lyricsCue(session.snapshot(), session.ps, at, prefs), at, Date.now(), session.ps?.song.id);
   });
-  useEffect(() => tick(cue, ctxNow, ms));
+  useEffect(() => tick(cue, ctxNow, ms, ps?.song.id));
 
   const words = holder.current;
   const change = (patch: Partial<LyricsPrefs>) => {

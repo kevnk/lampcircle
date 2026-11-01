@@ -113,6 +113,8 @@ export interface WordsState {
   cues: CueState;
   display: DisplayState;
   faces: ScreenFaces;
+  /** The song with words on the last tick. Between songs and through a song with no words there is none. */
+  song?: string;
 }
 
 export const WORDS_START: WordsState = { mode: 'words', tap: null, cues: CUE_START, display: { seq: 0, up: null, pending: null }, faces: { up: null, was: null, p: 1, from: 1 } };
@@ -124,10 +126,15 @@ export const toggleScreen = (state: WordsState, mode: Exclude<ScreenMode, 'words
 /** Shows a slide now, over Blank or Logo too. */
 export const tapSlide = (state: WordsState, lines: string[]): WordsState => ({ ...state, mode: 'words', tap: lines });
 
-export function tickWords(state: WordsState, cue: LyricsCue, at: Pick<CueInput, 'ctxNow' | 'ms'>): { state: WordsState; cues: DisplayCue[] } {
-  const step = nextCue(state.cues, cue, { ...at, mode: state.mode, tap: state.tap ?? undefined });
+/**
+ * One tick of the screen. `song` is the id of the song playing. A new song with words lets go of a Blank or Logo held
+ * from before it, so it can't hide those words from the room. Up stays up until the song's first change comes due.
+ */
+export function tickWords(state: WordsState, cue: LyricsCue, at: Pick<CueInput, 'ctxNow' | 'ms'>, song?: string): { state: WordsState; cues: DisplayCue[] } {
+  const mode = song !== undefined && song !== state.song && !cue.idle ? 'words' : state.mode;
+  const step = nextCue(state.cues, cue, { ...at, mode, tap: state.tap ?? undefined });
   const display = step.cues.reduce((held, sent) => takeCue(held, sent, at.ms), state.display);
-  return { state: { ...state, tap: null, cues: step.state, display, faces: facesAt(state.faces, display, at.ms) }, cues: step.cues };
+  return { state: { ...state, mode, song: cue.idle ? undefined : song, tap: null, cues: step.state, display, faces: facesAt(state.faces, display, at.ms) }, cues: step.cues };
 }
 
 /**

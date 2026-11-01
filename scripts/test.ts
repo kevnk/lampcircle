@@ -1427,6 +1427,39 @@ same('what the picker says: how to reach the TV, what Turn off does, nothing to 
   windowLib.displayHint(null, [mac, screen('projector')], false),
 ], [true, true, null, true, null, null]);
 
+// Blank and Logo across songs. Each step is [song id, cue, press], and gives [mode, what is on the screen].
+const heldAcross = (steps: Array<[string | undefined, ReturnType<typeof cueLib.lyricsCue>, ((state: WordsState) => WordsState)?]>) => {
+  let state = wordsLib.WORDS_START;
+  return steps.map(([song, cue, press]) => {
+    state = wordsLib.tickWords(press ? press(state) : state, cue, { ctxNow: 110, ms: 110000 }, song).state;
+    return [state.mode, faceText(state)];
+  });
+};
+const wordsCue = cueLib.lyricsCue(inVerse(10), cuePs, 110);
+const padCue = cueLib.lyricsCue({ ...inVerse(10), song: null }, null, 50);
+const noWordsCue = cueLib.lyricsCue(inVerse(10), psOf(cueBase), 110);
+const comingCue = { ...wordsCue, now: null, since: null };
+same('a new song with words lets go of a Logo from between songs, and the logo stays up until its first slide is due', heldAcross([
+  [undefined, padCue, logo],
+  ['b', comingCue],
+  ['b', wordsCue],
+]), [['logo', 'logo'], ['words', 'logo'], ['words', 'Verse a']]);
+same('Blank pressed once the song is under way still holds', heldAcross([
+  ['b', wordsCue],
+  ['b', wordsCue, blank],
+  ['b', wordsCue],
+]), [['words', 'Verse a'], ['blank', '-'], ['blank', '-']]);
+same('a song with no words keeps the hold, and the next song with words lets go of it', heldAcross([
+  [undefined, padCue, logo],
+  ['c', noWordsCue],
+  ['d', wordsCue],
+]), [['logo', 'logo'], ['logo', 'logo'], ['words', 'Verse a']]);
+same('going back to the song that just ended counts as new, so Blank from the pad between lets go', heldAcross([
+  ['a', wordsCue],
+  [undefined, padCue, blank],
+  ['a', wordsCue],
+]), [['words', 'Verse a'], ['blank', '-'], ['words', 'Verse a']]);
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);
