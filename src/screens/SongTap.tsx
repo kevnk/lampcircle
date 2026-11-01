@@ -2,14 +2,16 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Pointe
 import { ChevronLeft, ChevronRight, MousePointer2, Pause, Play, Scissors, Undo2, X } from 'lucide-react';
 import type { Section, SectionType, Song, Tap } from '../types';
 import { go, useStore } from '../store';
-import { Button, Card, LinkButton, Menu, MenuItem, SongHeader, StepPills, Stepper, beatsLabel, shadeClass, useFrame, useKeys, type StepName } from '../ui';
-import { transport } from '../audio/engine';
+import { Button, Card, LinkButton, Menu, MenuItem, SongHeader, StepPills, Stepper, ask, askText, beatsLabel, shadeClass, useFrame, useKeys, type StepName } from '../ui';
+import { sinceEvent, transport } from '../audio/engine';
 import { isIOS } from '../platform';
 import { KEY_NAMES, detectKey, keyName } from '../lib/music';
 import { sectionChroma, snapToOnset, type Onsets } from '../lib/analysis';
 import { onsetsOf } from '../lib/library';
+import { applyTapOffset, loadTapPrefs } from '../lib/tapCalibration';
 import { LyricsLane, type LyricsEdit } from './LyricsLane';
 import { LyricsPanel } from './LyricsPanel';
+import { TapOffset, TapPad } from './TapCalibration';
 import {
   MIN_TAPS,
   SECTION_TYPES,
@@ -21,12 +23,15 @@ import {
   clock,
   cutBar,
   cutSection,
+  listenedTo,
   liveBpm,
   mapTaps,
   markSection,
   moveSection,
+  pastBars,
   sectionViews,
   songGrid,
+  toggleOne,
   unmarked,
   type SectionView,
 } from '../lib/songMap';
@@ -57,10 +62,16 @@ export function doneSteps(song: Song): StepName[] {
 export function SongTap({ song }: { song: Song }) {
   const store = useStore();
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [env, setEnv] = useState<Onsets | null>(null);
+  /** The attacks could not be found, so "Map the rest" falls back on spacing beats evenly from the taps. */
+  const [noEnv, setNoEnv] = useState(false);
   const [flash, setFlash] = useState(false);
-  const [custom, setCustom] = useState<string | null>(null);
+  /** A custom name being typed, and where in the song it was asked for. */
+  const [custom, setCustom] = useState<{ at: number; name: string } | null>(null);
   const [hint, setHint] = useState<string | null>(null);
+  const [tapNote, setTapNote] = useState<string | null>(null);
+  const [tapPrefs, setTapPrefs] = useState(loadTapPrefs);
   /** Re-tapping: taps outside [start, end) are ignored, each new tap replaces the old taps before it, and playback stops at `stop`. */
   const [retap, setRetap] = useState<{ label: string; start: number; end: number; stop: number; half: number; fresh: Set<Tap> } | null>(null);
   const [tool, setTool] = useState<Tool>('select');
@@ -74,13 +85,18 @@ export function SongTap({ song }: { song: Song }) {
 
   useEffect(() => {
     let live = true;
-    setEnv(null);
-    void transport.load(song.id).then(async () => {
-      setLoaded(true);
-      const buffer = transport.buffer;
-      const found = buffer && (await onsetsOf(buffer).catch(() => null));
-      if (live) setEnv(found);
-    });
+    transport.load(song.id).then(
+      async () => {
+        if (!live) return;
+        setLoaded(true);
+        const buffer = transport.buffer;
+        const found = buffer ? await Promise.resolve(buffer).then(onsetsOf).catch(() => null) : null;
+        if (!live) return;
+        setEnv(found);
+        setNoEnv(!found);
+      },
+      problem => live && setLoadError(problem instanceof Error ? problem.message : 'The recording would not open.'),
+    );
     return () => {
       live = false;
       transport.pause();
@@ -88,7 +104,10 @@ export function SongTap({ song }: { song: Song }) {
   }, [song.id]);
 
   useEffect(() => {
-    if (!playing) setRetap(null);
+    if (playing) return;
+    setRetap(null);
+    // The last frame of a song ends playback before the frame effect sees it, so this is where a song that played out gets its last bars.
+    save(listenedTo(latest.current, transport.position()), false);
   }, [playing]);
 
   useEffect(() => {
@@ -101,7 +120,9 @@ export function SongTap({ song }: { song: Song }) {
     return () => window.removeEventListener('mousedown', close);
   }, [selectedId]);
 
-  const save = (next: Song, undoable = true) => {
+  /** Takes a song, or a change to make to the song as it is by then, for edits that wait on a question. */
+  const save = (change: Song | ((current: Song) => Song), undoable = true) => {
+    const next = typeof change === 'function' ? change(latest.current) : change;
     if (next === latest.current) return;
     if (undoable) history.current = [...history.current.slice(-199), latest.current];
     latest.current = next;
@@ -127,6 +148,10 @@ export function SongTap({ song }: { song: Song }) {
   const bpm = liveBpm(grid);
   const rest = unmarked(song);
   const mapped = song.taps.some(item => item.auto);
+  const tappedBeats = grid.tapped.filter(Boolean).length;
+  const hasOne = song.taps.some(item => item.one);
+  const waiting = song.sections.filter(item => pastBars(song, item.at)).length;
+  const first = views[0];
   const last = views[views.length - 1];
   // Before any taps, left and right step 5 seconds.
   const bars = grid.downbeats.length ? grid.downbeats : Array.from({ length: Math.ceil(song.duration / 5) }, (_, i) => i * 5);
@@ -144,32 +169,46 @@ export function SongTap({ song }: { song: Song }) {
       transport.pause();
       return;
     }
-    // Sections cover what you have listened through, so only a playhead that just crossed the end extends it.
-    const current = latest.current;
-    if (current.sections.length > 0 && t - current.marksEnd >= 0.5 && t - current.marksEnd < 2) save({ ...current, marksEnd: t }, false);
+    save(listenedTo(latest.current, t), false);
   }, [frame]);
 
+  const blink = () => {
+    setFlash(true);
+    window.setTimeout(() => setFlash(false), 90);
+  };
+  /** Where in the song a press belongs. Stopped, that is just the playhead. */
+  const pressedAt = (stamp?: number) =>
+    transport.playing ? applyTapOffset(transport.heard() - sinceEvent(stamp), tapPrefs.offsetMs, transport.buffer?.duration) : transport.position();
   /** `stamp` is the key or click event's time, so a busy frame does not make the tap late. */
   const tap = (one: boolean, stamp?: number) => {
     if (!loaded) return;
-    const heard = transport.heard() - (transport.playing && stamp !== undefined ? Math.max(0, performance.now() - stamp) / 1000 : 0);
-    // A tap while it plays moves onto the drum hit or strum it was reaching for, if one is close.
-    const t = (transport.playing && env ? snapToOnset(env, heard) : null) ?? heard;
-    if (retap && (t < retap.start || t >= retap.end)) return;
-    setFlash(true);
-    window.setTimeout(() => setFlash(false), 90);
+    setTapNote(null);
     const current = latest.current;
+    if (!transport.playing) {
+      // Stopped, there is no beat to tap along to, so a tap only starts the song. Marking a 1 on the beat you stopped at is the one edit here.
+      const marked = one ? toggleOne(current, transport.position()) : null;
+      if (!marked) return transport.play();
+      blink();
+      const ones = (item: Song) => item.taps.filter(mark => mark.one).length;
+      setTapNote(`${ones(marked) > ones(current) ? 'That beat is a 1 now.' : 'That beat is no longer a 1.'} Backspace undoes it.`);
+      return save(marked);
+    }
+    const heard = pressedAt(stamp);
+    // A tap while it plays moves onto the drum hit or strum it was reaching for, if one is close.
+    const t = (env ? snapToOnset(env, heard) : null) ?? heard;
+    if (retap && (t < retap.start || t >= retap.end)) return;
+    blink();
     const added = { t, one };
     // Old taps go only as new ones reach them, so the bars, and the sections on them, never disappear.
     const kept = retap ? current.taps.filter(item => retap.fresh.has(item) || item.t < retap.start || item.t >= Math.min(t + retap.half, retap.end)) : current.taps;
     retap?.fresh.add(added);
     save({ ...current, taps: [...kept, added] });
   };
-  const mark = (type: SectionType, name?: string) => {
+  const mark = (type: SectionType, name?: string, at = pressedAt()) => {
     const current = latest.current;
     if (songGrid(current).downbeats.length === 0) return setHint('Tap a few beats first, so the app knows where the bars are.');
     setHint(null);
-    save(markSection(current, type, transport.heard(), name));
+    save(markSection(current, type, at, name));
   };
   const startOver = (clear: Partial<Song>) => {
     transport.pause();
@@ -225,11 +264,12 @@ export function SongTap({ song }: { song: Song }) {
 
   return (
     <div>
-      <SongHeader song={song} meta={`${song.artist || 'Unknown artist'} · ${clock(song.duration)}`}>
+      <SongHeader song={song} meta={`${song.artist || 'Unknown artist'} · ${clock(song.duration)} · ${song.beatsPerBar}/${song.beatsPerBar === 6 ? 8 : 4}`}>
         <StepPills current={['tap', 'sections']} done={doneSteps(song)} onStep={stepNav(song)} />
       </SongHeader>
 
       <Card className="px-5 pb-5 pt-4">
+        {loadError && <p className="mb-3 text-danger" role="alert">This song will not play here. {loadError}</p>}
         <div className="mb-4 flex items-center gap-5 ios:flex-wrap ios:gap-3">
           <Button tone="lantern" className="px-5" onClick={() => transport.toggle()} disabled={!loaded} aria-label={transport.playing ? 'Pause' : 'Play'}>
             {transport.playing ? <Pause className="h-4 w-4 fill-current" /> : <Play className="h-4 w-4 fill-current" />}
@@ -291,14 +331,12 @@ export function SongTap({ song }: { song: Song }) {
                 </MenuItem>
               ))}
               <hr className="my-1.5 border-line" />
-              <MenuItem onClick={() => last && save({ ...latest.current, marksEnd: song.duration })} disabled={!last || !rest}>
-                Run {last?.name ?? 'the last section'} to the end
-              </MenuItem>
-              <hr className="my-1.5 border-line" />
               <MenuItem
                 danger
-                onClick={() => {
-                  if (confirm(`Delete ${song.title} from your library?`)) void store.removeSong(song.id).then(() => go({ page: 'library' }));
+                onClick={async () => {
+                  if (!(await ask(`Delete ${song.title} from your library?`, 'Delete'))) return;
+                  await store.removeSong(song.id);
+                  go({ page: 'library' });
                 }}
               >
                 Delete song
@@ -332,17 +370,7 @@ export function SongTap({ song }: { song: Song }) {
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,354px)_minmax(0,1fr)]">
         <Card className="self-start p-5">
           <h2 className="mb-4 text-xl font-bold"><span className="text-amber">1</span> · Tap the beat</h2>
-          <button
-            type="button"
-            className={`w-full rounded-2xl border-2 px-3 py-7 text-center transition ${flash ? 'border-accent bg-accent-soft shadow-glow' : 'border-accent/40 bg-well hover:border-accent/70'} ios:py-12`}
-            // A touch counts as it lands, not when the finger lifts.
-            onClick={ios ? undefined : event => tap(event.shiftKey, event.timeStamp)}
-            onPointerDown={ios ? event => tap(false, event.timeStamp) : undefined}
-            disabled={!loaded}
-          >
-            <span className="block pl-[0.3em] text-4xl font-black tracking-[0.3em] text-amber">TAP</span>
-            <span className="mt-3 block whitespace-nowrap text-[13px] text-muted">{ios ? 'Tap on every beat' : 'Space on every beat · Shift+Space on beat 1'}</span>
-          </button>
+          <TapPad flash={flash} disabled={!loaded} hint={ios ? 'Tap on every beat' : 'Space on every beat · Shift+Space on beat 1'} onTap={tap} />
           {ios && (
             // There is no Shift to hold on a phone, so beat 1 has its own pad.
             <button
@@ -353,6 +381,20 @@ export function SongTap({ song }: { song: Song }) {
             >
               Tap beat 1
             </button>
+          )}
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <p className="text-sm text-muted">{hasOne ? 'Beat 1 is marked.' : 'No beat 1 yet. The first beat counts as beat 1.'}</p>
+            {!ios && (
+              // Stopped, this marks the beat nearest the playhead, or takes the mark off it.
+              <Button className="shrink-0 px-3.5 py-1.5 text-sm" title="Marks the beat you are on as a 1. Shift+Space does the same." onClick={event => tap(true, event.timeStamp)} disabled={!loaded}>
+                Beat 1 here
+              </Button>
+            )}
+          </div>
+          {tapNote && (
+            <p className="mt-2 text-sm text-amber" aria-live="polite">
+              {tapNote}
+            </p>
           )}
           {retap && (
             <p className="mt-3 text-sm text-amber" aria-live="polite">
@@ -365,21 +407,24 @@ export function SongTap({ song }: { song: Song }) {
           </p>
           <Button
             className="mt-4"
-            aria-pressed={mapped}
-            disabled={!env || (!mapped && grid.tapped.filter(Boolean).length < MIN_TAPS)}
-            title={env ? undefined : 'Listening to the song…'}
+            aria-pressed={mapped || (noEnv && song.fill)}
+            disabled={(!env && !noEnv) || (!mapped && !(noEnv && song.fill) && tappedBeats < MIN_TAPS)}
             onClick={() => {
               const current = latest.current;
-              const taps = mapped ? current.taps.filter(item => !item.auto) : env && mapTaps(current, env);
-              if (taps) save({ ...current, taps, fill: false });
+              if (mapped) return save({ ...current, taps: current.taps.filter(item => !item.auto), fill: false });
+              if (!env) return save({ ...current, fill: !current.fill });
+              save({ ...current, taps: mapTaps(current, env), fill: false });
             }}
           >
-            {mapped ? 'Mapped from the song ✓' : 'Map the rest from the song'}
+            {mapped ? 'Mapped from the song ✓' : env ? 'Map the rest from the song' : !noEnv ? 'Listening to the song…' : song.fill ? 'Filled from my taps ✓' : 'Fill the rest from my taps'}
           </Button>
           <p className="mt-4 text-sm text-muted">
-            Tap {MIN_TAPS} beats or more where the beat is clear, with {ios ? 'Tap beat 1' : 'Shift'} on a beat 1. Then map the rest: the app follows the
-            recording from your taps, drift and all. Gray ticks are beats the app placed.
+            {!mapped && tappedBeats > 0 && tappedBeats < MIN_TAPS ? `${tappedBeats} of ${MIN_TAPS} so far. ` : ''}
+            {noEnv
+              ? `The app could not listen to this recording. Tap ${MIN_TAPS} beats or more, then fill the rest: it keeps the tempo of your first and last taps.`
+              : `Tap ${MIN_TAPS} beats or more where the beat is clear, with ${ios ? 'Tap beat 1' : 'Shift'} on a beat 1. Then map the rest: the app follows the recording from your taps, drift and all. Gray ticks are beats the app placed.`}
           </p>
+          <TapOffset prefs={tapPrefs} playing={playing} onChange={setTapPrefs} />
         </Card>
 
         <Card className="p-5">
@@ -395,7 +440,7 @@ export function SongTap({ song }: { song: Song }) {
               </Button>
             ))}
             {custom === null ? (
-              <Button className="px-3.5" onClick={() => setCustom('')}>
+              <Button className="px-3.5" onClick={() => setCustom({ at: pressedAt(), name: '' })}>
                 <span className="text-xs font-bold text-amber">+</span>
                 Custom
               </Button>
@@ -404,11 +449,19 @@ export function SongTap({ song }: { song: Song }) {
                 className="flex gap-2"
                 onSubmit={event => {
                   event.preventDefault();
-                  if (custom.trim()) mark('custom', custom.trim());
+                  if (custom.name.trim()) mark('custom', custom.name.trim(), custom.at);
                   setCustom(null);
                 }}
               >
-                <input autoFocus value={custom} onChange={event => setCustom(event.target.value)} placeholder="Name, then Enter" aria-label="Custom section name" className="rounded-full border border-edge bg-well px-4" />
+                <input
+                  autoFocus
+                  value={custom.name}
+                  onChange={event => setCustom({ ...custom, name: event.target.value })}
+                  onKeyDown={event => event.key === 'Escape' && setCustom(null)}
+                  placeholder="Name, then Enter"
+                  aria-label="Custom section name"
+                  className="rounded-full border border-edge bg-well px-4"
+                />
                 <Button type="submit" tone="lantern">
                   Mark
                 </Button>
@@ -429,6 +482,21 @@ export function SongTap({ song }: { song: Song }) {
               </tr>
             </thead>
             <tbody className="ios:max-sm:block">
+              {first && first.s > 0 && (
+                <tr className="border-b border-line ios:max-sm:block">
+                  <td colSpan={3} className="py-2 text-sm ios:max-sm:block">
+                    <span className="text-muted">{first.s === 1 ? 'Bar 1 is' : `Bars 1–${first.s} are`} not in a section.</span>
+                    {first.section.type !== 'intro' && (
+                      <LinkButton className="ml-3" onClick={() => save(markSection(latest.current, 'intro', grid.downbeats[0]))}>
+                        Add an Intro
+                      </LinkButton>
+                    )}
+                    <LinkButton className="ml-3" onClick={() => save(moveSection(latest.current, first.section.id, -first.s))}>
+                      Start {first.name} at bar 1
+                    </LinkButton>
+                  </td>
+                </tr>
+              )}
               {views.map(view => (
                 <SectionRow key={view.section.id} song={song} view={view} save={save} loaded={loaded} selected={view === selected} onRetap={() => retapSection(view)} />
               ))}
@@ -439,7 +507,20 @@ export function SongTap({ song }: { song: Song }) {
                     {rest.key ?? '—'}
                     {rest.change ? ' · key change found' : ''}
                   </td>
-                  <td />
+                  <td className="py-2 text-right text-sm">
+                    {last && (
+                      <LinkButton className="whitespace-nowrap" onClick={() => save({ ...latest.current, marksEnd: song.duration })}>
+                        Run {last.name} to the end
+                      </LinkButton>
+                    )}
+                  </td>
+                </tr>
+              )}
+              {waiting > 0 && (
+                <tr className="ios:max-sm:block">
+                  <td colSpan={3} className="py-2 text-sm text-amber ios:max-sm:block">
+                    {waiting === 1 ? '1 mark is' : `${waiting} marks are`} past the last bar. Tap further or map the rest, and each lands on its bar.
+                  </td>
                 </tr>
               )}
               {views.length === 0 && !rest && (
@@ -465,7 +546,7 @@ export function SongTap({ song }: { song: Song }) {
 interface Edit {
   song: Song;
   view: SectionView;
-  save: (song: Song) => void;
+  save: (change: Song | ((current: Song) => Song)) => void;
 }
 
 function patched(song: Song, view: SectionView, patch: Partial<Section>): Song {
@@ -473,16 +554,17 @@ function patched(song: Song, view: SectionView, patch: Partial<Section>): Song {
 }
 
 function TypeSelect({ song, view, save }: Edit) {
-  const setType = (type: SectionType) => {
-    const name = type === 'custom' ? window.prompt('Name this section', view.section.name ?? '')?.trim() : undefined;
-    if (type === 'custom' && !name) return;
-    save(patched(song, view, { type, name }));
+  const setType = async (type: SectionType) => {
+    if (type !== 'custom') return save(patched(song, view, { type, name: undefined }));
+    const name = await askText('Name this section', view.section.name ?? '', 'Name it');
+    // The song may have moved on while the question was open.
+    if (name) save(current => patched(current, view, { type, name }));
   };
   return (
     <select
       aria-label={`Label of ${view.name}`}
       value={view.section.type}
-      onChange={event => setType(event.target.value as SectionType)}
+      onChange={event => void setType(event.target.value as SectionType)}
       title="Change the label"
       className="-ml-1 cursor-pointer appearance-none rounded-md bg-transparent px-1 py-0.5 font-semibold [field-sizing:content] hover:bg-raised"
     >

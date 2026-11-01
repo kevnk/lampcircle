@@ -40,6 +40,33 @@ export function now(): number {
   return audio().ctx.currentTime;
 }
 
+/** Seconds the browser says sound takes to reach the speakers. It can miss Bluetooth and AirPlay, which tap calibration makes up for. */
+export function reportedLatency(): number {
+  const { ctx } = audio();
+  return (ctx.baseLatency || 0) + (ctx.outputLatency || 0);
+}
+
+/** Seconds since a key or click event, so a busy frame does not make a press late. */
+export const sinceEvent = (stamp?: number) => (stamp === undefined ? 0 : Math.max(0, performance.now() - stamp) / 1000);
+
+/** Clicks at these audio clock times, through the same output as a song. The last is higher, to say it's the last. Returns a way to stop the rest. */
+export function playClicks(times: number[]): () => void {
+  const { ctx, main } = audio();
+  const clicks = times.map((t, i) => {
+    const click = ctx.createOscillator();
+    const gain = ctx.createGain();
+    click.frequency.value = i === times.length - 1 ? 2500 : 1500;
+    gain.gain.setValueAtTime(0.7, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+    click.connect(gain).connect(main);
+    click.onended = () => gain.disconnect();
+    click.start(t);
+    click.stop(t + 0.04);
+    return click;
+  });
+  return () => clicks.forEach(source => stop({ source }));
+}
+
 /** Output level, 0 to 1. */
 export function level(): number {
   const data = new Float32Array(audio().meter.fftSize);
@@ -126,7 +153,7 @@ function restore(fader: Fader, points: Points, from: number) {
   fader.points = points;
 }
 
-function stop(voice: Voice, at?: number) {
+function stop(voice: { source: AudioScheduledSourceNode }, at?: number) {
   try {
     voice.source.stop(at);
   } catch {
@@ -180,8 +207,7 @@ class Transport {
   heard(): number {
     const t = this.position();
     if (!this.voice) return t;
-    const { ctx } = audio();
-    return Math.max(0, t - (ctx.baseLatency || 0) - (ctx.outputLatency || 0));
+    return Math.max(0, t - reportedLatency());
   }
 
   play() {

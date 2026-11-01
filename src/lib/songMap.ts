@@ -10,6 +10,8 @@ export interface Grid {
   /** 1-based position of each beat in its bar. */
   beatInBar: number[];
   downbeats: number[];
+  /** The taps behind each beat, more than one where taps merged. Empty for a beat the grid placed itself. */
+  sources: Tap[][];
 }
 
 export interface SectionView {
@@ -32,6 +34,8 @@ export interface Check {
   ok: boolean;
   text: string;
   fix: Step;
+  /** The section the problem is in, for Fix to open. */
+  sectionId?: string;
 }
 
 export const SECTION_TYPES: Array<{ type: SectionType; label: string; short: string; shade: Shade }> = [
@@ -76,15 +80,17 @@ export function median(values: number[]): number {
 
 /** Every tap is a beat. Gaps get evenly spaced beats; `fill` extends from the edge tempos. Beats the app placed are not `tapped`. */
 export function buildGrid(taps: Tap[], beatsPerBar: number, duration: number, fill: boolean): Grid {
-  const merge = (list: Tap[], gap: number) =>
-    list.reduce<Tap[]>((out, tap) => {
+  type Merged = Tap & { from: Tap[] };
+  const merge = (list: Merged[], gap: number) =>
+    list.reduce<Merged[]>((out, tap) => {
       const last = out[out.length - 1];
-      if (last && tap.t - last.t < gap) out[out.length - 1] = { ...(last.auto && !tap.auto ? tap : last), one: last.one || tap.one };
+      if (last && tap.t - last.t < gap) out[out.length - 1] = { ...(last.auto && !tap.auto ? tap : last), one: last.one || tap.one, from: [...last.from, ...tap.from] };
       else out.push(tap);
       return out;
     }, []);
-  // Taps closer than 80 ms are one tap (a double press, or Space pressed again while paused).
-  const distinct = merge(taps.filter(tap => tap.t >= 0 && tap.t <= duration).sort((a, b) => a.t - b.t), 0.08);
+  const within = taps.filter(tap => tap.t >= 0 && tap.t <= duration).sort((a, b) => a.t - b.t);
+  // Taps closer than 80 ms are one tap (a double press).
+  const distinct = merge(within.map(tap => ({ ...tap, from: [tap] })), 0.08);
   const typical = median(distinct.slice(1).map((tap, i) => tap.t - distinct[i].t));
   const clean = typical > 0 ? merge(distinct, 0.4 * typical) : distinct;
   const gaps = clean.slice(1).map((tap, i) => tap.t - clean[i].t);
@@ -94,10 +100,12 @@ export function buildGrid(taps: Tap[], beatsPerBar: number, duration: number, fi
   const beats: number[] = [];
   const tapped: boolean[] = [];
   const ones: boolean[] = [];
-  const add = (t: number, isTap: boolean, one: boolean) => {
+  const sources: Tap[][] = [];
+  const add = (t: number, isTap: boolean, one: boolean, from: Tap[] = []) => {
     beats.push(t);
     tapped.push(isTap);
     ones.push(one);
+    sources.push(from);
   };
   clean.forEach((tap, i) => {
     if (i > 0) {
@@ -105,7 +113,7 @@ export function buildGrid(taps: Tap[], beatsPerBar: number, duration: number, fi
       const count = Math.min(10000, Math.max(1, Math.round(gap / localBeat(i - 1)) || 1));
       for (let k = 1; k < count; k++) add(clean[i - 1].t + (gap * k) / count, false, false);
     }
-    add(tap.t, !tap.auto, tap.one);
+    add(tap.t, !tap.auto, tap.one, tap.from);
   });
 
   if (fill && beats.length >= 2) {
@@ -116,6 +124,7 @@ export function buildGrid(taps: Tap[], beatsPerBar: number, duration: number, fi
     beats.unshift(...before);
     tapped.unshift(...before.map(() => false));
     ones.unshift(...before.map(() => false));
+    sources.unshift(...before.map(() => []));
     for (let t = beats[beats.length - 1] + tail; t < duration - 0.05; t += tail) add(t, false, false);
   }
 
@@ -127,7 +136,7 @@ export function buildGrid(taps: Tap[], beatsPerBar: number, duration: number, fi
     if (ones[i]) anchor = i;
     beatInBar.push((((i - anchor) % perBar) + perBar) % perBar + 1);
   }
-  return { beats, tapped, beatInBar, downbeats: beats.filter((_, i) => beatInBar[i] === 1) };
+  return { beats, tapped, beatInBar, downbeats: beats.filter((_, i) => beatInBar[i] === 1), sources };
 }
 
 /**
@@ -231,7 +240,8 @@ export function sectionViews(song: Song): SectionView[] {
     const n = d.length;
     if (n === 0) return [];
     const kept: Array<{ section: Section; s: number }> = [];
-    for (const section of [...song.sections].sort((a, b) => a.at - b.at)) {
+    // A mark past the bars waits for them, rather than show on a bar it was not marked on.
+    for (const section of [...song.sections].sort((a, b) => a.at - b.at).filter(item => !pastBars(song, item.at))) {
       const s = nearestIndex(d, section.at);
       const last = kept[kept.length - 1];
       if (last && last.s === s) {
@@ -341,7 +351,8 @@ export function checks(song: Song): Check[] {
   const lastBeat = grid.beats[grid.beats.length - 1] ?? 0;
   const gridOk = grid.downbeats.length >= 2 && song.duration - lastBeat <= 2 * barSeconds(grid, grid.downbeats.length);
   const rest = unmarked(song);
-  const sectionsOk = views.length > 0 && views[0].s === 0 && !rest;
+  const waiting = song.sections.filter(section => pastBars(song, section.at)).length;
+  const sectionsOk = views.length > 0 && views[0].s === 0 && !rest && waiting === 0;
   const keyless = views.filter(view => !view.key);
   const badSeams = views.filter(view => {
     const before = beatPos(grid, view.start);
@@ -354,7 +365,7 @@ export function checks(song: Song): Check[] {
     {
       id: 'grid',
       ok: gridOk,
-      text: gridOk ? 'The beat grid covers the song' : `The beat grid stops at ${clock(lastBeat)}. Tap further or fill the rest.`,
+      text: gridOk ? 'The beat grid covers the song' : `The beat grid stops at ${clock(lastBeat)}. Tap further or map the rest from the song.`,
       fix: 'tap',
     },
     {
@@ -362,11 +373,13 @@ export function checks(song: Song): Check[] {
       ok: sectionsOk,
       text: sectionsOk
         ? 'Every bar is in a section'
-        : views.length === 0
-          ? 'No sections yet'
-          : rest
-            ? `Bars after ${clock(rest.start)} are not in a section`
-            : 'Bars before the first section are not in a section',
+        : waiting > 0
+          ? `${waiting === 1 ? 'A section mark is' : `${waiting} section marks are`} past the last bar. Tap further or map the rest from the song.`
+          : views.length === 0
+            ? 'No sections yet'
+            : rest
+              ? `Bars after ${clock(rest.start)} are not in a section`
+              : 'Bars before the first section are not in a section',
       fix: 'sections',
     },
     {
@@ -382,6 +395,7 @@ export function checks(song: Song): Check[] {
         ? `${badSeams.map(view => view.name).join(', ')}: pickup or fades do not fit`
         : 'Every pickup and fade fits',
       fix: 'refine',
+      sectionId: badSeams[0]?.section.id,
     },
   ];
 }
@@ -407,11 +421,54 @@ export const STEP_LABEL: Record<Step, string> = {
   done: 'Open set',
 };
 
+/**
+ * A mark with no bar to land on yet: its nearest bar is past the last one, and the song has room for that bar.
+ * It stays in the map, and taps or mapping give it its bar.
+ */
+export function pastBars(song: Song, at: number): boolean {
+  const { beats, beatInBar, downbeats } = songGrid(song);
+  const last = downbeats[downbeats.length - 1];
+  if (last === undefined) return false;
+  const n = beats.length;
+  const beat = n > 1 ? beats[n - 1] - beats[n - 2] : 0.5;
+  const next = beats[n - 1] + (song.beatsPerBar - beatInBar[n - 1] + 1) * beat;
+  return at >= (last + next) / 2 && next < song.duration - 0.05;
+}
+
+/** Sections cover what you have listened through: a playhead that just crossed their end extends it, and one that reaches the end of the recording runs them out to it. A jump 2 s or more ahead extends nothing. */
+export function listenedTo(song: Song, t: number): Song {
+  const ahead = t - song.marksEnd;
+  if (song.sections.length === 0 || ahead <= 0 || ahead >= 2) return song;
+  if (t >= song.duration - 0.05) return { ...song, marksEnd: song.duration };
+  return ahead >= 0.5 ? { ...song, marksEnd: t } : song;
+}
+
+/**
+ * Makes the beat nearest `t` a 1, or takes the mark off it, and adds no beat. Null when no beat is within half a beat.
+ * A beat the app placed becomes a tap, so it keeps its 1 if mapping is turned off.
+ */
+export function toggleOne(song: Song, t: number): Song | null {
+  const { beats, sources } = songGrid(song);
+  if (beats.length < 2) return null;
+  const i = nearestIndex(beats, t);
+  const half = Math.min(...[beats[i] - beats[i - 1], beats[i + 1] - beats[i]].filter(gap => gap > 0)) / 2;
+  if (Math.abs(t - beats[i]) > half) return null;
+  const here = sources[i];
+  // Placed by the grid, so there is no tap to change: a new one goes exactly where the beat already is.
+  if (here.length === 0) return { ...song, taps: [...song.taps, { t: beats[i], one: true }] };
+  const one = !here.some(tap => tap.one);
+  // One tap holds the beat: a person's tap if there is one, or else the placed beat the grid kept, which becomes a tap.
+  // The others stay placed, or turning mapping off could split the beat, and a placed beat turned into a tap could move it.
+  const confirmed = here.every(tap => tap.auto) ? here[0] : null;
+  return { ...song, taps: song.taps.map(tap => (!here.includes(tap) ? tap : tap === confirmed ? { t: tap.t, one } : { ...tap, one })) };
+}
+
 export function markSection(song: Song, type: SectionType, at: number, name?: string): Song {
   const d = songGrid(song).downbeats;
   if (d.length === 0) return song;
   const s = nearestIndex(d, at);
-  const existing = sectionViews(song).find(view => view.s === s);
+  // Past the last bar every mark would snap to that one bar, so each would rename the section there instead of adding its own.
+  const existing = pastBars(song, at) ? undefined : sectionViews(song).find(view => view.s === s);
   const sections = existing
     ? song.sections.map(item => (item.id === existing.section.id ? { ...item, type, name } : item))
     : [...song.sections, { id: uid(), type, name, at, ...DEFAULT_SECTION }];
