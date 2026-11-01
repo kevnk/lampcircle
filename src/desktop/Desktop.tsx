@@ -65,8 +65,8 @@ export function Desktop() {
   );
 }
 
-/** A window-centered sheet. Escape or a click outside closes it. The page behind is inert until it does. */
-function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+/** For a sheet portaled over the page: Escape closes it, the page behind is inert, and focus goes back after. */
+export function useModal(onClose: () => void) {
   useEffect(() => {
     const escape = (event: KeyboardEvent) => event.key === 'Escape' && onClose();
     window.addEventListener('keydown', escape);
@@ -81,6 +81,11 @@ function Dialog({ title, onClose, children }: { title: string; onClose: () => vo
       opener?.focus();
     };
   }, []);
+}
+
+/** A window-centered sheet. Escape or a click outside closes it. The page behind is inert until it does. */
+function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  useModal(onClose);
   return createPortal(
     <div className="fixed inset-0 z-50 grid place-items-center bg-navy/40 p-5" onMouseDown={onClose}>
       <div
@@ -105,8 +110,16 @@ function Dialog({ title, onClose, children }: { title: string; onClose: () => vo
 
 const field = 'w-full rounded-2xl border border-faint bg-well px-4 py-3';
 
-/** The note alone, to the feedback relay, which files a public GitHub issue. The app never holds a token. */
 function FeedbackDialog({ onClose }: { onClose: () => void }) {
+  return (
+    <Dialog title="Send feedback" onClose={onClose}>
+      <FeedbackForm />
+    </Dialog>
+  );
+}
+
+/** The note alone, to the feedback relay, which files a public GitHub issue. The app never holds a token. */
+export function FeedbackForm() {
   const [message, setMessage] = useState('');
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -127,33 +140,31 @@ function FeedbackDialog({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <Dialog title="Send feedback" onClose={onClose}>
-      <form
-        className="space-y-3"
-        onSubmit={event => {
-          event.preventDefault();
-          void send();
-        }}
-        onKeyDown={event => {
-          if (event.key === 'Enter' && event.metaKey) void send();
-        }}
-      >
-        <p className="text-muted">A bug, an idea, anything at all.</p>
-        <p className="text-sm text-muted">It becomes a public GitHub issue, so leave out anything private.</p>
-        <textarea rows={5} maxLength={FEEDBACK_MAX} placeholder="What happened?" aria-label="Your note" className={field} value={message} onChange={event => setMessage(event.target.value)} autoFocus />
-        <div className="flex items-center justify-between gap-3 pt-1">
-          <span className="text-sm text-muted">⌘↩ sends</span>
-          <Button tone="primary" type="submit" disabled={busy || !message.trim()}>
-            {busy ? 'Sending…' : 'Send'}
-          </Button>
-        </div>
-        {status && (
-          <p className="text-sm" role="status">
-            {status}
-          </p>
-        )}
-      </form>
-    </Dialog>
+    <form
+      className="space-y-3"
+      onSubmit={event => {
+        event.preventDefault();
+        void send();
+      }}
+      onKeyDown={event => {
+        if (event.key === 'Enter' && event.metaKey) void send();
+      }}
+    >
+      <p className="text-muted">A bug, an idea, anything at all.</p>
+      <p className="text-sm text-muted">It becomes a public GitHub issue, so leave out anything private.</p>
+      <textarea rows={5} maxLength={FEEDBACK_MAX} placeholder="What happened?" aria-label="Your note" className={field} value={message} onChange={event => setMessage(event.target.value)} autoFocus />
+      <div className="flex items-center justify-between gap-3 pt-1">
+        <span className="text-sm text-muted ios:hidden">⌘↩ sends</span>
+        <Button tone="primary" type="submit" className="ios:w-full" disabled={busy || !message.trim()}>
+          {busy ? 'Sending…' : 'Send'}
+        </Button>
+      </div>
+      {status && (
+        <p className="text-sm" role="status">
+          {status}
+        </p>
+      )}
+    </form>
   );
 }
 
