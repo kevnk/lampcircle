@@ -7,6 +7,8 @@ const KEY = 'lampcircle.lyricsPrefs';
 /** The app-wide default's choices, the same as a song's own on Map Song. */
 export const LEAD_BEATS = { min: 1, max: 3, step: 0.5 };
 export const FADE_BEATS = { min: 0, max: 2, step: 0.5 };
+/** Milliseconds a screen runs behind, such as a TV on AirPlay. */
+export const DISPLAY_DELAY = { min: 0, max: 500, step: 50 };
 
 const fit = (value: unknown, range: typeof LEAD_BEATS, fallback: number) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.min(range.max, Math.max(range.min, Math.round(value / range.step) * range.step)) : fallback;
@@ -30,13 +32,44 @@ export function loadLyricsPrefs(): LyricsPrefs {
   }
 }
 
-export function saveLyricsPrefs(prefs: LyricsPrefs) {
+/** The saved prefs with these changed, so saving one choice keeps the others. */
+export function mergeLyricsPrefs(saved: string | null, patch: Partial<LyricsPrefs> | { displayDelayMs: number }): string {
+  let kept: unknown;
   try {
-    localStorage.setItem(KEY, JSON.stringify(prefs));
+    kept = JSON.parse(saved ?? '{}');
+  } catch {
+    kept = {};
+  }
+  return JSON.stringify({ ...(kept && typeof kept === 'object' ? kept : {}), ...patch });
+}
+
+function savePrefs(patch: Parameters<typeof mergeLyricsPrefs>[1]) {
+  try {
+    localStorage.setItem(KEY, mergeLyricsPrefs(localStorage.getItem(KEY), patch));
   } catch {
     // Private mode: keep the choice for this visit only.
   }
 }
+
+export const saveLyricsPrefs = (prefs: LyricsPrefs) => savePrefs(prefs);
+
+export function parseDisplayDelay(saved: string | null): number {
+  try {
+    return fit(JSON.parse(saved ?? '{}')?.displayDelayMs, DISPLAY_DELAY, DISPLAY_DELAY.min);
+  } catch {
+    return DISPLAY_DELAY.min;
+  }
+}
+
+export function loadDisplayDelay(): number {
+  try {
+    return parseDisplayDelay(localStorage.getItem(KEY));
+  } catch {
+    return DISPLAY_DELAY.min;
+  }
+}
+
+export const saveDisplayDelay = (displayDelayMs: number) => savePrefs({ displayDelayMs });
 
 /** Some section of the song points at a slide with words on it. */
 export function hasWords(song: Song): boolean {

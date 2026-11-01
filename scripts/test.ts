@@ -1246,6 +1246,158 @@ same('a song with no lead or fade writes none to its .djw, and only slides with 
   [cueBase, withWords(cueBase), { ...withWords(cueBase), lyrics: { blocks: { verse: [[]] } } }].map(song => wordsLib.hasWords(song)),
 ], [[false, false], [false, true, false]]);
 
+// The Mac lyrics window: cues from a real PerformSession on the test clock, sent the way Perform sends them, into a
+// display built the way the window builds it.
+const windowLib = await import('../src/lib/lyricsWindow.ts');
+type Shown = Array<[string, number]>;
+type WindowDisplay = import('../src/lib/lyricsCue.ts').DisplayState;
+const blankDisplay = (): WindowDisplay => ({ seq: 0, up: null, pending: null });
+const faceName = (cue: import('../src/lib/lyricsCue.ts').DisplayCue | null) => (cue ? cue.text || (cue.logo ? 'logo' : '-') : null);
+
+/** What a window shows and when: `joinAt` is when it opens and catches up, `until` is in seconds. */
+function windowRun({ delay = 0, joinAt = 0, until, steps = [] }: { delay?: number; joinAt?: number; until: number; steps?: Array<[number, (state: WordsState) => WordsState]> }) {
+  clockNow = 0;
+  const session = new engine.PerformSession(async () => null);
+  session.startSong({ ...cuePs, buffer: { duration: cuePs.song.duration } } as never, { from: 1 });
+  let state = windowLib.wordsStartAt(5000);
+  let shownDisplay: WindowDisplay | null = null;
+  let faces = wordsLib.WORDS_START.faces;
+  const shown: Shown = [];
+  const strip: Shown = [];
+  let stripFace: string | null = null;
+  for (let k = 0, i = 0; k <= until * 100; k++) {
+    clockNow = k / 100;
+    const ms = clockNow * 1000;
+    while (i < steps.length && clockNow >= steps[i][0]) state = steps[i++][1](state);
+    session.tick();
+    const step = wordsLib.tickWords(state, cueLib.lyricsCue(session.snapshot(), session.ps, clockNow), { ctxNow: clockNow, ms });
+    state = step.state;
+    const take = (cues: import('../src/lib/lyricsCue.ts').DisplayCue[]) => {
+      shownDisplay = cues.map(cue => windowLib.scheduleCue(cue, delay, ms)).reduce((held, cue) => cueLib.takeCue(held, cue, ms), shownDisplay!);
+    };
+    if (!shownDisplay && clockNow >= joinAt) {
+      shownDisplay = blankDisplay();
+      take(windowLib.catchUpCues(state.display));
+    } else if (shownDisplay) take(step.cues);
+    if (shownDisplay) {
+      const before = faceName(faces.up);
+      faces = wordsLib.facesAt(faces, shownDisplay, ms);
+      if (faceName(faces.up) !== before) shown.push([faceName(faces.up)!, clockNow]);
+    }
+    if (faceName(state.faces.up) !== stripFace) strip.push([(stripFace = faceName(state.faces.up))!, clockNow]);
+  }
+  return { shown, strip, state, faces };
+}
+same('the window: no delay, every change lands when it lands on the Words strip', [windowRun({ until: 10 }).shown, windowRun({ until: 10 }).strip], [
+  [['-', 0], ['Verse a', 0.1], ['Verse b', 4.1], ['-', 9.1]],
+  [['-', 0], ['Verse a', 0.1], ['Verse b', 4.1], ['-', 9.1]],
+]);
+same('the display delay: changes cued ahead come that much sooner, one due within it goes up now, and the strip keeps real time', [windowRun({ delay: 200, until: 10 }).shown, windowRun({ delay: 200, until: 10 }).strip], [
+  [['Verse a', 0], ['Verse b', 3.9], ['-', 8.9]],
+  [['-', 0], ['Verse a', 0.1], ['Verse b', 4.1], ['-', 9.1]],
+]);
+same('the display delay: a change to go up now cannot come sooner, a near one goes up now, and the fade stays', [
+  windowLib.scheduleCue({ seq: 1, text: 'Now', logo: false, changeAtMs: 1000, fadeMs: 250 }, 300, 1000).changeAtMs,
+  windowLib.scheduleCue({ seq: 2, text: 'Near', logo: false, changeAtMs: 1100, fadeMs: 500 }, 300, 1000),
+  windowLib.scheduleCue({ seq: 3, text: 'Later', logo: false, changeAtMs: 4000, fadeMs: 500 }, 300, 1000).changeAtMs,
+], [1000, { seq: 2, text: 'Near', logo: false, changeAtMs: 1000, fadeMs: 500 }, 3700]);
+same('Blank goes up at once on the window, however long the delay', windowRun({ delay: 500, until: 3, steps: [[2, blank]] }).shown, [['Verse a', 0], ['-', 2]]);
+
+const late = windowRun({ joinAt: 6, until: 10 });
+same('a window opened late: the slide the strip has up at once, fully faded in, then the next on time', [late.shown, windowRun({ joinAt: 6, until: 6 }).faces.p], [[['Verse b', 6], ['-', 9.1]], 1]);
+same('a window opened over Blank or the logo shows that, and one opened before any cue waits for the first', [
+  windowRun({ joinAt: 3, until: 4, steps: [[2, blank]] }).shown,
+  windowRun({ joinAt: 3, until: 4, steps: [[2, logo]] }).shown,
+  windowLib.catchUpCues(wordsLib.WORDS_START.display),
+], [[['-', 3]], [['logo', 3]], []]);
+same('catching up sends the slide up, then the one to come, so it reads the same as the strip', (() => {
+  const up = { seq: 7, text: 'A', logo: false, changeAtMs: 0, fadeMs: 250 };
+  const pending = { seq: 8, text: 'B', logo: false, changeAtMs: 9000, fadeMs: 500 };
+  return windowLib.catchUpCues({ seq: 8, up, pending }).reduce((held, cue) => cueLib.takeCue(held, cue, 5000), blankDisplay());
+})(), { seq: 8, up: { seq: 7, text: 'A', logo: false, changeAtMs: 0, fadeMs: 250 }, pending: { seq: 8, text: 'B', logo: false, changeAtMs: 9000, fadeMs: 500 } });
+
+const faceAt = (seq: number, text: string, changeAtMs = 0) => ({ seq, text, logo: false, changeAtMs, fadeMs: 250 });
+same('seq: an open window ignores a cue that arrives late, and a new strip, counting from later, still gets through', (() => {
+  let held = cueLib.takeCue(blankDisplay(), faceAt(101, 'New'), 10);
+  held = cueLib.takeCue(held, faceAt(100, 'Old'), 20);
+  const first = held.up?.text;
+  const again = wordsLib.tickWords(windowLib.wordsStartAt(5000), cueLib.lyricsCue(inVerse(10), cuePs, 110), { ctxNow: 110, ms: 110000 }).cues[0];
+  held = cueLib.takeCue(held, again, 110000);
+  return [first, held.up?.text, again.seq];
+})(), ['New', 'Verse a', 5001]);
+same('leaving Perform: black now, past the cue to come, and the state sends what is up again if the strip comes back', (() => {
+  let { state } = wordsLib.tickWords(windowLib.wordsStartAt(5000), cueLib.lyricsCue(inVerse(10), cuePs, 110), { ctxNow: 110, ms: 110000 });
+  const held = cueLib.takeCue(cueLib.takeCue(blankDisplay(), { seq: 5001, text: 'Verse a', logo: false, changeAtMs: 110000, fadeMs: 250 }, 110000), { seq: 5002, text: 'Verse b', logo: false, changeAtMs: 111000, fadeMs: 500 }, 110000);
+  const left = windowLib.leaveCue(state, 110500);
+  state = left.state;
+  const after = cueLib.takeCue(held, left.cue, 110500);
+  const back = wordsLib.tickWords(state, cueLib.lyricsCue(inVerse(10), cuePs, 110.6), { ctxNow: 110.6, ms: 110600 }).cues.map(cue => [cue.seq, cue.text]);
+  return [faceName(after.up), after.pending, left.cue.seq, back];
+})(), ['-', null, 5003, [[5004, 'Verse a'], [5005, 'Verse b']]]);
+
+const windowSteps: string[] = [];
+const inTurn = windowLib.oneAtATime();
+await Promise.all([
+  inTurn(async () => {
+    windowSteps.push('move starts');
+    await new Promise(done => setTimeout(done, 5));
+    windowSteps.push('move ends');
+  }),
+  inTurn(async () => void windowSteps.push('turn off')),
+  inTurn(async () => {
+    throw new Error('a job that fails');
+  }).catch(() => windowSteps.push('failure seen')),
+  inTurn(async () => void windowSteps.push('check')),
+]);
+same('open, close and checks: Turn off waits for a move under way, and a failed job does not stop the next', windowSteps, ['move starts', 'move ends', 'turn off', 'failure seen', 'check']);
+
+const screen = (id: string, isPrimary = false) => ({ id, name: `Monitor #${id}`, width: 1920, height: 1080, x: 0, y: 0, isPrimary });
+const mac = screen('mac', true);
+same('the screen offered first: a second one if there is one, else the only one; each named by its place', [
+  windowLib.defaultMonitor([mac, screen('tv')])?.id,
+  windowLib.defaultMonitor([screen('tv'), mac])?.id,
+  windowLib.defaultMonitor([mac])?.id,
+  windowLib.defaultMonitor([]),
+  windowLib.monitorChoices([mac, screen('tv'), screen('projector')]).map(monitor => monitor.id),
+  [mac, screen('tv'), screen('projector')].map((monitor, _, all) => windowLib.monitorLabel(monitor, all)),
+], ['tv', 'tv', 'mac', null, ['tv', 'projector', 'mac'], ['Main display', 'Display 2', 'Display 3']]);
+same('the button follows the truth: closed on its own, unplugged, opened before the strip came back, or fine', [
+  windowLib.syncDisplay('tv', null, [mac, screen('tv')]),
+  windowLib.syncDisplay('tv', 'mac', [mac]),
+  windowLib.syncDisplay(null, 'tv', [mac, screen('tv')]),
+  windowLib.syncDisplay('tv', 'tv', [mac, screen('tv')]),
+  windowLib.syncDisplay(null, null, [mac]),
+], [
+  { chosen: null, close: false },
+  { chosen: null, close: true },
+  { chosen: 'tv', close: false },
+  { chosen: 'tv', close: false },
+  { chosen: null, close: false },
+]);
+same('the display delay is saved with lead and fade: held to its range, and saving either keeps the other', [
+  wordsLib.parseDisplayDelay(null),
+  wordsLib.parseDisplayDelay('{"displayDelayMs":200}'),
+  wordsLib.parseDisplayDelay('{"displayDelayMs":9000}'),
+  wordsLib.parseDisplayDelay('{"displayDelayMs":-5}'),
+  wordsLib.parseDisplayDelay('{"displayDelayMs":"x"}'),
+  wordsLib.parseDisplayDelay('not json'),
+  JSON.parse(wordsLib.mergeLyricsPrefs('{"displayDelayMs":200}', { leadBeats: 3, fadeBeats: 0 })),
+  JSON.parse(wordsLib.mergeLyricsPrefs('{"leadBeats":3,"fadeBeats":0}', { displayDelayMs: 100 })),
+  JSON.parse(wordsLib.mergeLyricsPrefs('not json', { displayDelayMs: 100 })),
+  wordsLib.parseLyricsPrefs('{"leadBeats":3,"fadeBeats":0,"displayDelayMs":100}'),
+], [
+  0,
+  200,
+  500,
+  0,
+  0,
+  0,
+  { displayDelayMs: 200, leadBeats: 3, fadeBeats: 0 },
+  { leadBeats: 3, fadeBeats: 0, displayDelayMs: 100 },
+  { displayDelayMs: 100 },
+  { leadBeats: 3, fadeBeats: 0 },
+]);
+
 if (failed) {
   console.log(`\n${failed} failed`);
   process.exit(1);

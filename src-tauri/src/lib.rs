@@ -6,6 +6,8 @@ mod error;
 mod feedback;
 mod ios;
 mod login_item;
+#[cfg(desktop)]
+mod lyrics_window;
 mod session;
 mod storage;
 mod updater;
@@ -346,6 +348,7 @@ pub fn run() {
                 let _ = window.hide();
             }
         }
+        lyrics_window::on_window_event(window, event);
     });
 
     builder
@@ -358,6 +361,14 @@ pub fn run() {
             relaunch,
             take_opened_files,
             open_settings,
+            #[cfg(desktop)]
+            lyrics_window::list_monitors,
+            #[cfg(desktop)]
+            lyrics_window::lyrics_display_monitor,
+            #[cfg(desktop)]
+            lyrics_window::open_lyrics_display,
+            #[cfg(desktop)]
+            lyrics_window::close_lyrics_display,
             login_item::set_open_at_login,
             login_item::get_open_at_login,
             session::get_last_session,

@@ -127,7 +127,7 @@ export const CUE_START: CueState = { seq: 0, up: null, pending: null, tapped: nu
 export interface CueInput {
   /** The context time the cue was worked out for. */
   ctxNow: number;
-  /** The display clock now, such as `performance.timeOrigin + performance.now()`. */
+  /** The display clock now. `Date.now()` on the Mac, where two windows share it; each window's `performance.now()` can stop during sleep. */
   ms: number;
   /** Blank and Logo hold the screen until it goes back to words. Missing means words. */
   mode?: 'words' | 'blank' | 'logo';

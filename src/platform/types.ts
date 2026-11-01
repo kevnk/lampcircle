@@ -1,5 +1,7 @@
 import type { DjwMap } from '../lib/djw';
+import type { DisplayCue } from '../lib/lyricsCue';
 import type { CaptionTrack } from '../lib/lyricsFetch';
+import type { MonitorInfo } from '../lib/lyricsWindow';
 
 /** The Mac app's preferences, from the TF Mac app template. The theme stays in theme.ts, where the web app keeps it too. */
 export type Settings = {
@@ -109,6 +111,19 @@ export type Desktop = {
   takeOpenedFiles(): Promise<Array<{ name: string; text: string }>>;
   /** Finder asked the app to open more files. */
   onFilesOpened(handler: () => void): () => void;
+  listMonitors(): Promise<MonitorInfo[]>;
+  /** Opens the lyrics window on a screen, or moves it there, and returns that screen's id. */
+  openLyricsDisplay(monitor?: string): Promise<string>;
+  closeLyricsDisplay(): Promise<void>;
+  /** The id of the screen the lyrics window is on. Null when it isn't open. */
+  lyricsDisplayMonitor(): Promise<string | null>;
+  onLyricsDisplayClosed(handler: () => void): () => void;
+  /** The lyrics window has opened and wants the current state. */
+  onLyricsDisplayReady(handler: () => void): () => void;
+  /** Sent together, so a change now can't arrive after the change it comes before. No window, no effect. */
+  sendLyricsCues(cues: DisplayCue[]): void;
+  /** For the lyrics window: takes cues, and asks for the current state once it is listening. */
+  joinLyricsCues(handler: (cues: DisplayCue[]) => void): () => void;
 };
 
 /** The iPhone and iPad features, from src-tauri/src/ios.rs. Only code that runs on iOS touches these. */

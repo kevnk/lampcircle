@@ -3,8 +3,9 @@ import { ChevronDown } from 'lucide-react';
 import type { Song } from '../types';
 import { Stepper, beatsLabel } from '../ui';
 import { now, type PerformSession } from '../audio/engine';
-import { lyricsCue, type LyricsPrefs } from '../lib/lyricsCue';
-import { FADE_BEATS, LEAD_BEATS, WORDS_START, beatsToChange, hasWords, loadLyricsPrefs, saveLyricsPrefs, slidesToOffer, tapSlide, tickWords, toggleScreen, type ScreenMode } from '../lib/lyricsDisplay';
+import { lyricsCue, type LyricsCue, type LyricsPrefs } from '../lib/lyricsCue';
+import { DISPLAY_DELAY, FADE_BEATS, LEAD_BEATS, beatsToChange, hasWords, loadDisplayDelay, loadLyricsPrefs, saveDisplayDelay, saveLyricsPrefs, slidesToOffer, tapSlide, tickWords, toggleScreen, type ScreenMode } from '../lib/lyricsDisplay';
+import { DisplayButton, freshWords, sendCues, useDisplayLink } from './LyricsDisplay';
 import { SlideScreen } from './LyricsPanel';
 
 /**
@@ -13,16 +14,25 @@ import { SlideScreen } from './LyricsPanel';
  */
 export function WordsStrip({ session, song }: { session: PerformSession; song: Song | undefined }) {
   const [prefs, setPrefs] = useState(loadLyricsPrefs);
+  const [delay, setDelay] = useState(loadDisplayDelay);
   const [timing, setTiming] = useState(false);
-  const holder = useRef(WORDS_START);
+  const [fresh] = useState(freshWords);
+  const holder = useRef(fresh);
   const snap = session.snapshot();
   const ctxNow = now();
-  const ms = performance.timeOrigin + performance.now();
+  const ms = Date.now();
   const ps = session.ps;
   const cue = lyricsCue(snap, ps, ctxNow, prefs);
-  useEffect(() => {
-    holder.current = tickWords(holder.current, cue, { ctxNow, ms }).state;
+  const tick = (latest: LyricsCue, at: number, atMs: number) => {
+    const step = tickWords(holder.current, latest, { ctxNow: at, ms: atMs });
+    holder.current = step.state;
+    sendCues(step.cues, atMs);
+  };
+  const link = useDisplayLink(holder, () => {
+    const at = now();
+    tick(lyricsCue(session.snapshot(), session.ps, at, prefs), at, Date.now());
   });
+  useEffect(() => tick(cue, ctxNow, ms));
 
   const words = holder.current;
   const change = (patch: Partial<LyricsPrefs>) => {
@@ -44,9 +54,7 @@ export function WordsStrip({ session, song }: { session: PerformSession; song: S
         <button type="button" aria-pressed={words.mode === 'logo'} className={button(words.mode === 'logo')} onClick={hold('logo')}>
           Logo
         </button>
-        <button type="button" disabled title="Coming in a later step" className={button()}>
-          Display
-        </button>
+        <DisplayButton link={link} className={button(link.on !== null)} />
       </div>
     );
   };
@@ -71,6 +79,24 @@ export function WordsStrip({ session, song }: { session: PerformSession; song: S
             How early a slide comes in and how long it dissolves, for every song that doesn't set its own.
             {ownNames && ` This song sets its own ${ownNames}.`}
           </p>
+          {link.available && (
+            <>
+              <div className="flex items-center gap-3">
+                <span>Display delay</span>
+                <Stepper
+                  name="display delay"
+                  label={`${delay} ms`}
+                  value={delay}
+                  {...DISPLAY_DELAY}
+                  onChange={next => {
+                    setDelay(next);
+                    saveDisplayDelay(next);
+                  }}
+                />
+              </div>
+              <p className="w-full text-sm text-muted">For a screen that runs late, like a TV on AirPlay: slides change this much sooner, so they land on time.</p>
+            </>
+          )}
         </div>
       )}
     </>
