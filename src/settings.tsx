@@ -84,6 +84,7 @@ export function WhenItOpens({ settings, save }: Pick<ReturnType<typeof useSettin
   return (
     <Row label="When Lamp Circle opens">
       <select
+        aria-label="When Lamp Circle opens"
         className="rounded-full border border-edge bg-panel px-3 py-1.5 ios:shrink-0"
         value={settings.openAtLaunch}
         onChange={event => void save({ openAtLaunch: event.target.value as Settings['openAtLaunch'] })}

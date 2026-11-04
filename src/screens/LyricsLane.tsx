@@ -191,7 +191,7 @@ function SlideInspector({ song, slide, editing, edit, setPicked, marks }: { song
       )}
       <div className="mt-3 flex items-center justify-between border-t border-line pt-3 text-sm">
         <span className="text-xs text-muted">Drag its left edge to move it.</span>
-        <Menu label="⋯">
+        <Menu label="⋯" name="Slide actions">
           <MenuItem onClick={() => act(splitSlide)} disabled={splitSlide(song, sectionId, i) === song}>
             Split
             <span className="block text-xs text-muted">Half its lines come in halfway to the next slide.</span>

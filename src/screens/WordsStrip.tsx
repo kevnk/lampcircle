@@ -149,7 +149,7 @@ export function WordsStrip({ session, song }: { session: PerformSession; song: S
 /** A slide beside the screen, dim until it is up. Tapping it shows it now. */
 function SlideRow({ label, lines, count, onTap }: { label: string; lines: string[]; count?: string; onTap: () => void }) {
   return (
-    <button type="button" className="min-h-14 w-full rounded-xl border border-line px-3 py-2.5 text-left hover:border-edge" aria-label={`Show now: ${lines.join(' / ') || 'a blank slide'}`} onClick={onTap}>
+    <button type="button" className="min-h-14 w-full rounded-xl border border-line px-3 py-2.5 text-left hover:border-edge" aria-label={`${label}${count ? ` ${count}` : ''}: ${lines.join(' / ') || 'a blank slide'}. Show now`} onClick={onTap}>
       <span className="flex items-baseline justify-between gap-3">
         <span className="caps text-muted">{label}</span>
         {count && <span className="tabular text-lg font-bold text-amber">{count}</span>}

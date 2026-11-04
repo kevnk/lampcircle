@@ -23,13 +23,19 @@ export default function App() {
 function Shell() {
   const route = useRoute();
   const { loaded, loadError } = useStore();
-  if (loadError) return <p className="p-8">Could not open your library. {loadError} Close other tabs of this app and reload.</p>;
+  if (loadError) {
+    return (
+      <main className="p-8">
+        <p role="alert">Could not open your library. {loadError} Close other tabs of this app and reload.</p>
+      </main>
+    );
+  }
   if (!loaded) {
     return (
-      <div className="flex min-h-full flex-col items-center justify-center gap-4 text-muted">
+      <main className="flex min-h-full flex-col items-center justify-center gap-4 text-muted">
         <RestingBars />
-        <p>Loading your library…</p>
-      </div>
+        <p role="status">Loading your library…</p>
+      </main>
     );
   }
   if (route.page === 'perform') return <Perform key={`${route.setId}`} setId={route.setId} item={route.item} />;

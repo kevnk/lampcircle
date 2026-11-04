@@ -193,8 +193,8 @@ export function Label({ children, className = '' }: { children: ReactNode; class
   return <p className={`caps text-muted ${className}`}>{children}</p>;
 }
 
-/** A disclosure with its own outside-click close. */
-export function Menu({ label, children, align = 'right' }: { label: string; children: ReactNode; align?: 'left' | 'right' }) {
+/** A disclosure with its own outside-click close. `name` is what a screen reader says when `label` is only a symbol. */
+export function Menu({ label, name, children, align = 'right' }: { label: string; name?: string; children: ReactNode; align?: 'left' | 'right' }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -217,6 +217,7 @@ export function Menu({ label, children, align = 'right' }: { label: string; chil
       <button
         type="button"
         aria-expanded={open}
+        aria-label={name}
         className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 hover:bg-raised ${open ? 'bg-raised' : ''}`}
         onClick={() => setOpen(!open)}
       >
@@ -289,7 +290,7 @@ export function shadeClass(view: SectionView): string {
 export function MiniStrip({ views }: { views: SectionView[] }) {
   if (views.length === 0) return <p className="text-sm text-muted">No sections yet.</p>;
   return (
-    <div className="flex flex-wrap gap-x-0.5 gap-y-1" aria-label={`Sections: ${views.map(view => view.name).join(', ')}`}>
+    <div className="flex flex-wrap gap-x-0.5 gap-y-1" role="img" aria-label={`Sections: ${views.map(view => view.name).join(', ')}`}>
       {views.map(view => (
         <div
           key={view.section.id}

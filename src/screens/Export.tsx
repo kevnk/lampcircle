@@ -65,6 +65,7 @@ export function Export({ song }: { song: Song }) {
                 {!check.ok && (
                   <LinkButton
                     className="ml-2 text-sm"
+                    aria-label={`Fix: ${check.text}`}
                     onClick={() => {
                       if (check.sectionId) focusedSection.set(song.id, check.sectionId);
                       stepNav(song)(check.fix === 'set' || check.fix === 'done' ? 'export' : check.fix);
@@ -129,7 +130,11 @@ export function Export({ song }: { song: Song }) {
           </span>
         </label>
 
-        {error && <p className="mt-4 text-sm text-danger">{error}</p>}
+        {error && (
+          <p className="mt-4 text-sm text-danger" role="alert">
+            {error}
+          </p>
+        )}
         <div className="mt-4 flex justify-end">
           <Button tone="primary" disabled={passing < list.length} onClick={() => void save()}>
             Save &amp; add to set
