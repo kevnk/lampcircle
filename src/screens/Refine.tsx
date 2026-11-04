@@ -199,7 +199,8 @@ function Seam({ song, view, onChange }: { song: Song; view: SectionView; onChang
       <div className="mb-2 mt-8 flex flex-wrap items-baseline justify-between gap-2">
         <p className="font-medium">Listen</p>
         {snap && (
-          <p className="tabular text-sm text-muted" aria-live="polite">
+          // Off: it changes every bar, which a screen reader would read out over the music.
+          <p className="tabular text-sm text-muted" aria-live="off">
             pass {snap.pass}
             {mode === 'loop' && !repeat ? ' of 2' : ''} · bar {snap.bar}
           </p>

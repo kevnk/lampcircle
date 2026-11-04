@@ -93,6 +93,8 @@ export function Sets({ id }: { id?: string }) {
     <div>
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
+          {/* The name field is the page's title, so heading navigation still finds one. */}
+          <h1 className="sr-only">{set.name || 'Set'}</h1>
           <input
             aria-label="Set name"
             value={set.name}
@@ -255,9 +257,10 @@ export function Sets({ id }: { id?: string }) {
                         <span
                           key={`${tonic}-${k}`}
                           title={have.has(tonic) ? undefined : 'No pad in this key yet. Perform skips it.'}
-                          className={`rounded-full border bg-well px-2 py-0.5 text-xs font-semibold ${have.has(tonic) ? 'border-accent/50 text-amber' : 'border-dashed border-faint text-faint'}`}
+                          className={`rounded-full border bg-well px-2 py-0.5 text-xs font-semibold ${have.has(tonic) ? 'border-accent/50 text-amber' : 'border-dashed border-faint text-muted'}`}
                         >
                           {KEY_NAMES[tonic]}
+                          {!have.has(tonic) && <span className="sr-only"> (no pad yet)</span>}
                         </span>
                       ))}
                       <button

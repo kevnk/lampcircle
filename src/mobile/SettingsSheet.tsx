@@ -138,8 +138,8 @@ function Backup({ busy, setBusy }: { busy: boolean; setBusy: (busy: boolean) => 
         <Button tone="primary" disabled={busy || (!songs.length && !pads.length && !sets.length)} onClick={() => void backUp()}>
           Back up library
         </Button>
-        {/* A label, so the tap itself opens the picker: iOS can ignore a script's click on a hidden file input. */}
-        <label className={`inline-flex min-h-11 items-center justify-center rounded-full border border-edge bg-panel px-5 py-2.5 font-medium ${busy ? 'pointer-events-none text-faint' : 'text-ink'}`}>
+        {/* A label, so the tap itself opens the picker: iOS can ignore a script's click on a hidden file input. It shows the focus ring its hidden input can't. */}
+        <label className={`inline-flex min-h-11 items-center justify-center rounded-full border border-edge bg-panel px-5 py-2.5 font-medium has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-amber ${busy ? 'pointer-events-none text-faint' : 'text-ink'}`}>
           Restore from a backup
           <input
             type="file"

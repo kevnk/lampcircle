@@ -44,7 +44,7 @@ export function SettingsApp() {
     <div className="min-h-full bg-page">
       {/* The window's title bar: the traffic lights sit over its left end, and it drags the window. */}
       <div data-tauri-drag-region className="sticky top-0 z-10 flex h-12 items-center justify-center bg-page font-semibold">
-        <span data-tauri-drag-region>Settings</span>
+        <h1 data-tauri-drag-region>Settings</h1>
       </div>
       <fieldset disabled={!loaded} className="space-y-6 px-6 pb-8 pt-2">
         <Group title="General">

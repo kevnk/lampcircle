@@ -391,11 +391,10 @@ export function SongTap({ song }: { song: Song }) {
               </Button>
             )}
           </div>
-          {tapNote && (
-            <p className="mt-2 text-sm text-amber" aria-live="polite">
-              {tapNote}
-            </p>
-          )}
+          {/* Live regions stay mounted, empty, so a screen reader hears the note when it arrives. */}
+          <p className="mt-2 text-sm text-amber empty:mt-0" aria-live="polite">
+            {tapNote}
+          </p>
           {retap && (
             <p className="mt-3 text-sm text-amber" aria-live="polite">
               Re-tapping {retap.label}. New taps replace the old ones as you go. <LinkButton onClick={() => transport.pause()}>Stop</LinkButton>
@@ -468,7 +467,9 @@ export function SongTap({ song }: { song: Song }) {
               </form>
             )}
           </div>
-          {hint && <p className="mt-3 text-sm text-amber">{hint}</p>}
+          <p className="mt-3 text-sm text-amber empty:mt-0" aria-live="polite">
+            {hint}
+          </p>
 
           {/* On a phone each section's row stacks: its label and key, then its buttons. */}
           <table className="mt-6 w-full text-left ios:max-sm:block">

@@ -358,8 +358,10 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
               Hold to stop
             </HoldButton>
           )}
-          <p className="tabular ml-auto text-2xl font-bold" aria-label="Position">
-            {position && position.bar > 0 ? position.bar : '—'} · {position?.beat ?? '—'}
+          <p className="tabular ml-auto text-2xl font-bold">
+            <span className="sr-only">Bar </span>
+            {position && position.bar > 0 ? position.bar : '—'} · <span className="sr-only">beat </span>
+            {position?.beat ?? '—'}
           </p>
           {beatBars}
           <ThemeToggle />
@@ -394,8 +396,9 @@ export function Perform({ setId, item }: { setId: string; item: number }) {
               {fadeSwitch}
             </div>
           )}
-          <p className="tabular text-3xl font-bold" aria-label="Position">
-            Bar {position && position.bar > 0 ? position.bar : '—'} · {position?.beat ?? '—'}
+          <p className="tabular text-3xl font-bold">
+            Bar {position && position.bar > 0 ? position.bar : '—'} · <span className="sr-only">beat </span>
+            {position?.beat ?? '—'}
           </p>
           {beatBars}
           {isSong && (
