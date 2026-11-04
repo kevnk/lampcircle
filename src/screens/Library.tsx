@@ -598,7 +598,7 @@ function PadTable() {
   };
   const keys = (
     <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
-      <div className="flex gap-1 ios:flex-wrap" role="img" aria-label={`Pads in${pads.length ? [...have].map(tonic => KEY_NAMES[tonic]).join(', ') : 'no keys yet'}`}>
+      <div className="flex gap-1 ios:flex-wrap" role="img" aria-label={`Pads in ${pads.length ? [...have].map(tonic => KEY_NAMES[tonic]).join(', ') : 'no keys yet'}`}>
         {KEY_NAMES.map((name, tonic) => (
           <span key={name} className={`w-9 rounded-full py-1 text-center text-xs font-semibold ${have.has(tonic) ? 'bg-accent-soft text-amber ring-1 ring-accent/40' : 'border border-dashed border-faint text-muted'}`}>
             {name}
